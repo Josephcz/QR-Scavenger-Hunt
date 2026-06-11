@@ -28,7 +28,6 @@ Fill `.env.local` with your Supabase project values:
 
 ```env
 NEXT_PUBLIC_EVENT_NAME="QR Scavenger Hunt"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
 SUPABASE_URL="https://YOUR-PROJECT-REF.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
@@ -67,6 +66,8 @@ Open:
 ```txt
 /admin
 ```
+
+QR URLs in the admin dashboard are generated from the current request domain, so they will use localhost locally and your real domain after deployment.
 
 The admin page lets you:
 

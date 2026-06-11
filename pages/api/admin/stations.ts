@@ -33,7 +33,7 @@ async function getStations(req: NextApiRequest, res: NextApiResponse) {
 
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || requestOrigin(req);
+  const baseUrl = requestOrigin(req);
 
   return res.status(200).json({
     ok: true,
@@ -79,7 +79,7 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
         .single();
 
       if (!error && data) {
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || requestOrigin(req);
+        const baseUrl = requestOrigin(req);
         return res.status(200).json({ ok: true, station: publicAdminStation(data, baseUrl) });
       }
 
