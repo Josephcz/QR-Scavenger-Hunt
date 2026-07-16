@@ -130,6 +130,7 @@ async function currentCluePayload({
   isFinalStation: boolean;
 }) {
   const leaderboard = isFinalStation ? await getLeaderboard() : [];
+  const clueUnlocked = await hasUnlockedClue(team.id, station);
   return {
     ok: true,
     alreadyCompleted,
@@ -143,7 +144,7 @@ async function currentCluePayload({
     isFinalStation,
     leaderboard,
     hintAlreadyUsed: await hasUsedHint(team.id, station.id),
-    station: publicStation(station),
+    station: publicStation(station, clueUnlocked),
   };
 }
 
@@ -199,6 +200,21 @@ async function hasUsedHint(teamId: string, stationId: string) {
   return Boolean(data);
 }
 
+async function hasUnlockedClue(teamId: string, station: any) {
+  if (!station.clue_requires_solution) return true;
+  const answers = Array.isArray(station.clue_answer_keys) ? station.clue_answer_keys : [];
+  if (answers.length === 0) return true;
+
+  const { data } = await supabaseAdmin
+    .from('clue_unlocks')
+    .select('id')
+    .eq('team_id', teamId)
+    .eq('station_id', station.id)
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
 async function getLeaderboard() {
   const { data, error } = await supabaseAdmin
     .from('teams')
@@ -217,19 +233,22 @@ async function getLeaderboard() {
   }));
 }
 
-function publicStation(station: any) {
+function publicStation(station: any, clueUnlocked: boolean) {
+  const requiresClueUnlock = Boolean(station.clue_requires_solution && Array.isArray(station.clue_answer_keys) && station.clue_answer_keys.length);
+  const canShowClue = !requiresClueUnlock || clueUnlocked;
   return {
     id: station.id,
     order: station.sort_order,
     code: station.code,
     title: station.title,
-    body: station.body_markdown,
-    imageUrl: station.image_url,
+    body: canShowClue ? station.body_markdown : '',
+    imageUrl: canShowClue ? station.image_url : null,
     points: station.points,
     hasHint: Boolean(station.hint_text || station.hint_image_url),
     hintPenalty: station.hint_penalty || 0,
-    hintPromptText: station.hint_prompt_text,
-    hintPromptImageUrl: station.hint_prompt_image_url,
-    hintRequiresAnswer: Boolean(station.hint_answer_key),
+    clueRequiresSolution: requiresClueUnlock,
+    clueUnlocked: canShowClue,
+    cluePromptText: requiresClueUnlock && !canShowClue ? station.clue_prompt_text : null,
+    cluePromptImageUrl: requiresClueUnlock && !canShowClue ? station.clue_prompt_image_url : null,
   };
 }

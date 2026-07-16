@@ -6,7 +6,6 @@ type HintBody = {
   teamId?: string;
   deviceKey?: string;
   stationCode?: string;
-  answer?: string;
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -35,30 +34,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(403).json({ ok: false, error: 'This hint is locked until you scan that station in sequence.' });
     }
 
-    const { data: existingUsage, error: usageLookupError } = await supabaseAdmin
-      .from('hint_usages')
-      .select('id')
-      .eq('team_id', team.id)
-      .eq('station_id', station.id)
-      .maybeSingle();
-
-    if (usageLookupError) return res.status(500).json({ ok: false, error: usageLookupError.message });
-
-    if (!existingUsage && station.hint_answer_key) {
-      const submitted = normalizeAnswer(body.answer || '');
-      const expected = normalizeAnswer(station.hint_answer_key);
-      if (!submitted) {
-        return res.status(400).json({
-          ok: false,
-          requiresAnswer: true,
-          error: 'Enter the hint unlock answer first.',
-        });
-      }
-      if (submitted !== expected) {
-        return res.status(403).json({ ok: false, requiresAnswer: true, error: 'That does not unlock the extra hint yet.' });
-      }
-    }
-
     const { data: result, error: hintError } = await supabaseAdmin.rpc('use_hint', {
       p_team_id: team.id,
       p_station_id: station.id,
@@ -81,8 +56,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch {
     return res.status(400).json({ ok: false, error: 'Invalid request.' });
   }
-}
-
-function normalizeAnswer(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }

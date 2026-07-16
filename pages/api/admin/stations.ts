@@ -9,9 +9,10 @@ type StationBody = {
   body?: string;
   imageUrl?: string;
   points?: number;
-  hintPromptText?: string;
-  hintPromptImageUrl?: string;
-  hintAnswerKey?: string;
+  clueRequiresSolution?: boolean;
+  cluePromptText?: string;
+  cluePromptImageUrl?: string;
+  clueAnswerKeys?: string[];
   hintText?: string;
   hintImageUrl?: string;
   hintPenalty?: number;
@@ -47,11 +48,22 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
     const sortOrder = Number(body.sortOrder);
     const points = Number.isFinite(Number(body.points)) ? Number(body.points) : 10;
     const hintPenalty = Number.isFinite(Number(body.hintPenalty)) ? Number(body.hintPenalty) : 0;
+    const clueRequiresSolution = Boolean(body.clueRequiresSolution);
+    const clueAnswerKeys = cleanAnswerKeys(body.clueAnswerKeys || []);
 
     if (!Number.isInteger(sortOrder) || sortOrder < 1) {
       return res.status(400).json({ ok: false, error: 'Station order must be a positive integer.' });
     }
+    if (!Number.isInteger(points) || points < 0) {
+      return res.status(400).json({ ok: false, error: 'Points must be a non-negative integer.' });
+    }
+    if (!Number.isInteger(hintPenalty) || hintPenalty < 0) {
+      return res.status(400).json({ ok: false, error: 'Hint penalty must be a non-negative integer.' });
+    }
     if (!body.title?.trim()) return res.status(400).json({ ok: false, error: 'Station title is required.' });
+    if (clueRequiresSolution && clueAnswerKeys.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Add at least one accepted answer when hiding the clue behind a prompt.' });
+    }
 
     for (let attempts = 0; attempts < 5; attempts += 1) {
       const code = randomCode('ST', 8);
@@ -68,9 +80,13 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
           question_text: '',
           answer_key: null,
           points,
-          hint_prompt_text: body.hintPromptText?.trim() || null,
-          hint_prompt_image_url: body.hintPromptImageUrl?.trim() || null,
-          hint_answer_key: body.hintAnswerKey?.trim() || null,
+          clue_requires_solution: clueRequiresSolution,
+          clue_prompt_text: clueRequiresSolution ? body.cluePromptText?.trim() || null : null,
+          clue_prompt_image_url: clueRequiresSolution ? body.cluePromptImageUrl?.trim() || null : null,
+          clue_answer_keys: clueRequiresSolution ? clueAnswerKeys : [],
+          hint_prompt_text: null,
+          hint_prompt_image_url: null,
+          hint_answer_key: null,
           hint_text: body.hintText?.trim() || null,
           hint_image_url: body.hintImageUrl?.trim() || null,
           hint_penalty: hintPenalty,
@@ -94,6 +110,10 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
   }
 }
 
+function cleanAnswerKeys(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
 function requestOrigin(req: NextApiRequest) {
   const proto = (req.headers['x-forwarded-proto'] as string) || 'http';
   const host = req.headers.host || 'localhost:3000';
@@ -112,9 +132,10 @@ function publicAdminStation(station: any, baseUrl: string) {
     body: station.body_markdown,
     imageUrl: station.image_url,
     points: station.points,
-    hintPromptText: station.hint_prompt_text,
-    hintPromptImageUrl: station.hint_prompt_image_url,
-    hintAnswerKey: station.hint_answer_key,
+    clueRequiresSolution: Boolean(station.clue_requires_solution),
+    cluePromptText: station.clue_prompt_text,
+    cluePromptImageUrl: station.clue_prompt_image_url,
+    clueAnswerKeys: station.clue_answer_keys || [],
     hintText: station.hint_text,
     hintImageUrl: station.hint_image_url,
     hintPenalty: station.hint_penalty,

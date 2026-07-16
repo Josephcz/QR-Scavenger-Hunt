@@ -11,9 +11,10 @@ type Station = {
   points: number;
   hasHint: boolean;
   hintPenalty: number;
-  hintPromptText?: string | null;
-  hintPromptImageUrl?: string | null;
-  hintRequiresAnswer?: boolean;
+  clueRequiresSolution: boolean;
+  clueUnlocked: boolean;
+  cluePromptText?: string | null;
+  cluePromptImageUrl?: string | null;
 };
 
 type LeaderboardRow = {
@@ -81,8 +82,10 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
   const [state, setState] = useState<ScanState>({ loading: true, error: '' });
   const [hintLoading, setHintLoading] = useState(false);
   const [hint, setHint] = useState<HintState | null>(null);
-  const [hintAnswer, setHintAnswer] = useState('');
   const [hintError, setHintError] = useState('');
+  const [unlockAnswer, setUnlockAnswer] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockError, setUnlockError] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -90,7 +93,8 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
       setState({ loading: true, error: '' });
       setHint(null);
       setHintError('');
-      setHintAnswer('');
+      setUnlockAnswer('');
+      setUnlockError('');
 
       try {
         const payload = await runCachedScan({
@@ -144,13 +148,50 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
     return `${state.station.points} point${state.station.points === 1 ? '' : 's'}`;
   }, [state.station]);
 
+  async function unlockClue(event: FormEvent) {
+    event.preventDefault();
+    if (!state.station) return;
+
+    setUnlockLoading(true);
+    setUnlockError('');
+    try {
+      const response = await fetch('/api/stations/unlock-clue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamId: team.id,
+          deviceKey: team.deviceKey,
+          stationCode: state.station.code,
+          answer: unlockAnswer,
+        }),
+      });
+      const payload = await response.json();
+      if (!payload.ok) {
+        setUnlockError(payload.error || 'That does not unlock the clue yet.');
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        station: payload.station,
+        message: payload.message || current.message,
+        messageKind: payload.messageKind || current.messageKind,
+      }));
+      setUnlockAnswer('');
+    } catch {
+      setUnlockError('Network error. Try again.');
+    } finally {
+      setUnlockLoading(false);
+    }
+  }
+
   async function getHint(event?: FormEvent) {
     event?.preventDefault();
     if (!state.station) return;
     const penalty = state.station.hintPenalty || 0;
     const ok = window.confirm(
       penalty > 0 && !state.hintAlreadyUsed
-        ? `Are you sure? Unlocking this hint costs ${penalty} point${penalty === 1 ? '' : 's'}.`
+        ? `Are you sure? Revealing this hint costs ${penalty} point${penalty === 1 ? '' : 's'}.`
         : 'Reveal this extra hint?'
     );
     if (!ok) return;
@@ -165,12 +206,11 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           teamId: team.id,
           deviceKey: team.deviceKey,
           stationCode: state.station.code,
-          answer: hintAnswer,
         }),
       });
       const payload = await response.json();
       if (!payload.ok) {
-        setHintError(payload.error || 'Could not unlock hint.');
+        setHintError(payload.error || 'Could not reveal hint.');
         return;
       }
 
@@ -232,6 +272,8 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
     );
   }
 
+  const clueLocked = station.clueRequiresSolution && !station.clueUnlocked;
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
@@ -245,8 +287,34 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
 
       {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
 
-      {station.imageUrl ? <img className="station-image" src={station.imageUrl} alt="Station visual clue" /> : null}
-      {station.body ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p> : null}
+      {clueLocked ? (
+        <section className="hint-card">
+          <div className="kicker">Clue locked</div>
+          <p className="small muted">Solve this prompt to reveal the clue for the next QR.</p>
+          {station.cluePromptText ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.cluePromptText}</p> : null}
+          {station.cluePromptImageUrl ? <img className="hint-image" src={station.cluePromptImageUrl} alt="Clue unlock visual" /> : null}
+          <form className="form compact-form" onSubmit={unlockClue}>
+            <label>
+              <div className="label">Answer</div>
+              <input
+                className="input"
+                value={unlockAnswer}
+                onChange={(event) => setUnlockAnswer(event.target.value)}
+                placeholder="Type the solution"
+              />
+            </label>
+            <button className="button" disabled={unlockLoading} type="submit">
+              {unlockLoading ? 'Checking…' : 'Reveal clue'}
+            </button>
+          </form>
+          {unlockError ? <p className="notice error small">{unlockError}</p> : null}
+        </section>
+      ) : (
+        <>
+          {station.imageUrl ? <img className="station-image" src={station.imageUrl} alt="Station visual clue" /> : null}
+          {station.body ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p> : null}
+        </>
+      )}
 
       {station.hasHint ? (
         <section className="hint-card">
@@ -254,26 +322,11 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           {state.hintAlreadyUsed ? (
             <p className="small muted">This hint was already unlocked for your team. You can show it again without losing more points.</p>
           ) : (
-            <p className="small muted">Solve this mini-prompt to unlock the extra hint{station.hintPenalty ? ` for ${station.hintPenalty} point${station.hintPenalty === 1 ? '' : 's'}` : ''}.</p>
+            <p className="small muted">Reveal an extra hint{station.hintPenalty ? ` for ${station.hintPenalty} point${station.hintPenalty === 1 ? '' : 's'}` : ''}. No answer is required.</p>
           )}
-
-          {station.hintPromptText ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.hintPromptText}</p> : null}
-          {station.hintPromptImageUrl ? <img className="hint-image" src={station.hintPromptImageUrl} alt="Hint unlock visual" /> : null}
-
           <form className="form compact-form" onSubmit={getHint}>
-            {station.hintRequiresAnswer && !state.hintAlreadyUsed ? (
-              <label>
-                <div className="label">Unlock answer</div>
-                <input
-                  className="input"
-                  value={hintAnswer}
-                  onChange={(event) => setHintAnswer(event.target.value)}
-                  placeholder="Type the string from the image or prompt"
-                />
-              </label>
-            ) : null}
             <button className="button secondary" disabled={hintLoading || Boolean(hint)} type="submit">
-              {hintLoading ? 'Unlocking…' : state.hintAlreadyUsed ? 'Show hint again' : 'Unlock extra hint'}
+              {hintLoading ? 'Revealing…' : state.hintAlreadyUsed ? 'Show hint again' : 'Spend points for hint'}
             </button>
           </form>
         </section>

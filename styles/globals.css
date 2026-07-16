@@ -353,3 +353,63 @@ tr:last-child td {
   margin-top: 12px;
   gap: 10px;
 }
+
+.inline-code {
+  display: inline-block;
+  margin: 2px 0;
+  word-break: normal;
+  white-space: nowrap;
+}
+
+.answer-chip {
+  margin-left: 4px;
+}
+
+.action-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.compact-button {
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.compact-notice {
+  display: inline-block;
+  padding: 6px 8px;
+}
+
+.stations-table {
+  min-width: 1180px;
+}
+
+.admin-preview {
+  max-width: 260px;
+  max-height: 84px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.nested-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+}
