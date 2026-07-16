@@ -1,0 +1,24 @@
+- change the link in Stations & QR links to be normal instead of becoming two lines (line breaking) where the highlights overlap - fix the highlight I guess or just make clickable text instead of containing the full link text.
+- Stations and QR links should contain all the necessary information to unlock everything
+- Stations and QR links should have a save QR button that generates and saves/downloads QR codes
+- Leaderboard should be first in the list of Admin things - Restore team should be last
+- Stations/Create stations should have the given logic; Station order prefilled and editable, Points, Title, Reveal text. Otionally a hide reveal text until prompt solved option (can be a checkbox, can just be underneath it). The prompt may contain text and optional image with an input for the solved result (ignore case and toLower()). Beneath all of that we'll have an optional costly hint that costs points, but can just be gained without any extra work the cost should be visible next to the reveal hint option. 
+
+
+
+
+- add a QR code scanner to the web browser in a way that doesn't open another window, but keeps it right there in the same window (QR icon/button at the bottom of the screen - always there, but make sure to add enough padding at the bottom of the page for no text to be hidden)
+- Initial page should have a welcome to the hunt banner, clear text to save the recovery code and instructions to scan the first QR code 
+- Opening the base page should lead to the teams current hint if they are already signed in to the browser
+- Add a section at the bottom of the page with a phone number leading to whom they should contact via WhatsApp or call in case of issues or QR codes not working
+- The sign in should contain clear instructions about what to do if they've lost their recovery code including whom to contact (same number from environment variables)
+- After registering the site shouldn't show "Start  QR Scavenger Hunt  Register your team, scan the first QR code, and complete the stations in order." anymore. It should just show the first hint or station 0 (also with no points) with the recovery code message above it 
+- The Show hint again button shouldn't show the modal window with "Are you sure? This hint costs 3 points." It should just show the hint
+- Adding a station with a station order that already exists should show an error that reflects that, not "Could not generate a unique station code."
+- Add photo upload to admin dashboard in create and edit station
+- add a copy symbol that copies next to the recovery ID
+- Adjust size of image to fit fully no matter what it is - scale it 
+- Add Hunt table so that everything is tied to it allowing for multiple hunts
+
+
+- add optional sound hint like the image hint 
