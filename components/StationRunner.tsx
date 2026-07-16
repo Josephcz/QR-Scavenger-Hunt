@@ -165,7 +165,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           answer: unlockAnswer,
         }),
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
       if (!payload.ok) {
         setUnlockError(payload.error || 'That does not unlock the clue yet.');
         return;
@@ -208,7 +208,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           stationCode: state.station.code,
         }),
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
       if (!payload.ok) {
         setHintError(payload.error || 'Could not reveal hint.');
         return;
@@ -342,6 +342,15 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
       {hintError ? <p className="notice error small">{hintError}</p> : null}
     </div>
   );
+}
+
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: text || `Request failed with HTTP ${response.status}.` };
+  }
 }
 
 function messageClass(kind?: ScanState['messageKind']) {

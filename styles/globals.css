@@ -413,3 +413,32 @@ tr:last-child td {
   width: 18px;
   height: 18px;
 }
+
+.image-field {
+  display: grid;
+  gap: 8px;
+}
+
+.image-actions {
+  gap: 8px;
+}
+
+.upload-button {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-button input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-button:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type Team = {
@@ -31,7 +31,28 @@ type Station = {
   qrUrl: string;
 };
 
+type StationPayload = {
+  id?: string;
+  sortOrder: number;
+  points: number;
+  title: string;
+  body: string;
+  imageUrl: string;
+  clueRequiresSolution: boolean;
+  cluePromptText: string;
+  cluePromptImageUrl: string;
+  clueAnswerKeys: string[];
+  hintText: string;
+  hintImageUrl: string;
+  hintPenalty: number;
+  isActive: boolean;
+};
+
 type Tab = 'leaderboard' | 'stations' | 'create' | 'restore';
+type AdminFetch = (path: string, init?: RequestInit, overridePassword?: string) => Promise<Response>;
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 export function AdminClient() {
   const [password, setPassword] = useState('');
@@ -39,6 +60,7 @@ export function AdminClient() {
   const [tab, setTab] = useState<Tab>('leaderboard');
   const [teams, setTeams] = useState<Team[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
+  const [editingStation, setEditingStation] = useState<Station | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [createdMessage, setCreatedMessage] = useState('');
@@ -79,6 +101,10 @@ export function AdminClient() {
 
       setTeams(teamPayload.teams);
       setStations(stationPayload.stations);
+      if (editingStation) {
+        const refreshed = stationPayload.stations.find((station: Station) => station.id === editingStation.id) || null;
+        setEditingStation(refreshed);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load admin data.');
     } finally {
@@ -97,6 +123,41 @@ export function AdminClient() {
     window.sessionStorage.removeItem('qrhunt.adminPassword');
     setAuthed(false);
     setPassword('');
+  }
+
+  function openCreateTab() {
+    setEditingStation(null);
+    setTab('create');
+    setCreatedMessage('');
+    setError('');
+  }
+
+  function openEditTab(station: Station) {
+    setEditingStation(station);
+    setTab('create');
+    setCreatedMessage('');
+    setError('');
+  }
+
+  async function saveStation(payload: StationPayload) {
+    setError('');
+    setCreatedMessage('');
+    const isEdit = Boolean(payload.id);
+    const response = await adminFetch('/api/admin/stations', {
+      method: isEdit ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!result.ok) {
+      setError(result.error || (isEdit ? 'Could not update station.' : 'Could not create station.'));
+      return;
+    }
+
+    const warningText = result.deletionWarnings?.length ? ` Old image cleanup warning: ${result.deletionWarnings.join(' ')}` : '';
+    setCreatedMessage(`${isEdit ? 'Updated' : 'Created'} station #${result.station.order}: ${result.station.title}.${warningText}`);
+    setEditingStation(null);
+    await loadAll();
+    setTab('stations');
   }
 
   if (!authed) {
@@ -144,31 +205,22 @@ export function AdminClient() {
           <div className="tabs">
             <TabButton active={tab === 'leaderboard'} onClick={() => setTab('leaderboard')}>Leaderboard</TabButton>
             <TabButton active={tab === 'stations'} onClick={() => setTab('stations')}>Stations & QR links</TabButton>
-            <TabButton active={tab === 'create'} onClick={() => setTab('create')}>Create station</TabButton>
+            <TabButton active={tab === 'create'} onClick={openCreateTab}>{editingStation ? 'Edit station' : 'Create station'}</TabButton>
             <TabButton active={tab === 'restore'} onClick={() => setTab('restore')}>Restore team</TabButton>
           </div>
 
           {tab === 'leaderboard' ? <Leaderboard teams={teams} /> : null}
-          {tab === 'stations' ? <Stations stations={stations} /> : null}
+          {tab === 'stations' ? <Stations stations={stations} onEdit={openEditTab} /> : null}
           {tab === 'create' ? (
-            <CreateStation
-              onCreate={async (payload) => {
-                setError('');
-                setCreatedMessage('');
-                const response = await adminFetch('/api/admin/stations', {
-                  method: 'POST',
-                  body: JSON.stringify(payload),
-                });
-                const result = await response.json();
-                if (!result.ok) {
-                  setError(result.error || 'Could not create station.');
-                  return;
-                }
-                setCreatedMessage(`Created station #${result.station.order}: ${result.station.title}`);
-                await loadAll();
+            <StationForm
+              adminFetch={adminFetch}
+              station={editingStation}
+              nextOrder={(stations.at(-1)?.order || 0) + 1}
+              onCancel={() => {
+                setEditingStation(null);
                 setTab('stations');
               }}
-              nextOrder={(stations.at(-1)?.order || 0) + 1}
+              onSubmit={saveStation}
             />
           ) : null}
           {tab === 'restore' ? <RestoreTeams teams={teams} /> : null}
@@ -219,7 +271,7 @@ function Leaderboard({ teams }: { teams: Team[] }) {
   );
 }
 
-function Stations({ stations }: { stations: Station[] }) {
+function Stations({ stations, onEdit }: { stations: Station[]; onEdit: (station: Station) => void }) {
   async function copyUrl(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -244,6 +296,7 @@ function Stations({ stations }: { stations: Station[] }) {
               <th>Clue</th>
               <th>Paid hint</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -291,6 +344,9 @@ function Stations({ stations }: { stations: Station[] }) {
                   )}
                 </td>
                 <td>{station.isActive ? <span className="notice success small compact-notice">Active</span> : <span className="notice warning small compact-notice">Inactive</span>}</td>
+                <td>
+                  <button className="button secondary compact-button" type="button" onClick={() => onEdit(station)}>Edit</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -300,22 +356,25 @@ function Stations({ stations }: { stations: Station[] }) {
   );
 }
 
-function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (payload: Record<string, unknown>) => Promise<void> }) {
+function StationForm({
+  adminFetch,
+  nextOrder,
+  station,
+  onCancel,
+  onSubmit,
+}: {
+  adminFetch: AdminFetch;
+  nextOrder: number;
+  station: Station | null;
+  onCancel: () => void;
+  onSubmit: (payload: StationPayload) => Promise<void>;
+}) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    sortOrder: String(nextOrder),
-    points: '10',
-    title: '',
-    body: '',
-    imageUrl: '',
-    clueRequiresSolution: false,
-    cluePromptText: '',
-    cluePromptImageUrl: '',
-    clueAnswerKeysText: '',
-    hintText: '',
-    hintImageUrl: '',
-    hintPenalty: '3',
-  });
+  const [form, setForm] = useState(() => stationToForm(station, nextOrder));
+
+  useEffect(() => {
+    setForm(stationToForm(station, nextOrder));
+  }, [station, nextOrder]);
 
   function update(field: keyof typeof form, value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -330,7 +389,8 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
         .map((answer) => answer.trim())
         .filter(Boolean);
 
-      await onCreate({
+      await onSubmit({
+        id: station?.id,
         sortOrder: Number(form.sortOrder),
         points: Number(form.points),
         title: form.title,
@@ -343,6 +403,7 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
         hintText: form.hintText,
         hintImageUrl: form.hintImageUrl,
         hintPenalty: Number(form.hintPenalty),
+        isActive: form.isActive,
       });
     } finally {
       setSaving(false);
@@ -351,8 +412,14 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
 
   return (
     <section>
-      <h2>Create station</h2>
-      <p>Each QR scan awards the station points. The clue text/image should tell the team how to find the next QR. You can optionally hide that clue behind a small solve prompt, then add a separate paid hint.</p>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h2>{station ? `Edit station #${station.order}` : 'Create station'}</h2>
+          <p>Each QR scan awards the station points. The clue text/image should tell the team how to find the next QR. You can optionally hide that clue behind a small solve prompt, then add a separate paid hint.</p>
+        </div>
+        {station ? <button className="button secondary" type="button" onClick={onCancel}>Cancel edit</button> : null}
+      </div>
+
       <form className="form" onSubmit={submit}>
         <div className="grid">
           <label>
@@ -375,10 +442,12 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
           <textarea className="textarea" value={form.body} onChange={(e) => update('body', e.target.value)} placeholder="Shown after this station is scanned, unless you enable the solve prompt below." />
         </label>
 
-        <label>
-          <div className="label">Clue image URL, optional</div>
-          <input className="input" value={form.imageUrl} onChange={(e) => update('imageUrl', e.target.value)} placeholder="Supabase Storage public URL for the revealed clue image" />
-        </label>
+        <ImageField
+          adminFetch={adminFetch}
+          label="Clue image"
+          value={form.imageUrl}
+          onChange={(value) => update('imageUrl', value)}
+        />
 
         <section className="nested-card">
           <label className="checkbox-row">
@@ -392,13 +461,15 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
                 <div className="label">Prompt text</div>
                 <textarea className="textarea" value={form.cluePromptText} onChange={(e) => update('cluePromptText', e.target.value)} placeholder="Example: What word is hidden in this image?" />
               </label>
-              <label>
-                <div className="label">Prompt image URL, optional</div>
-                <input className="input" value={form.cluePromptImageUrl} onChange={(e) => update('cluePromptImageUrl', e.target.value)} placeholder="Image players inspect before revealing the clue" />
-              </label>
+              <ImageField
+                adminFetch={adminFetch}
+                label="Prompt image"
+                value={form.cluePromptImageUrl}
+                onChange={(value) => update('cluePromptImageUrl', value)}
+              />
               <label>
                 <div className="label">Accepted answers</div>
-                <textarea className="textarea" value={form.clueAnswerKeysText} onChange={(e) => update('clueAnswerKeysText', e.target.value)} placeholder="One per line, or comma-separated. Case is ignored." required={form.clueRequiresSolution} />
+                <textarea className="textarea" value={form.clueAnswerKeysText} onChange={(e) => update('clueAnswerKeysText', e.target.value)} placeholder="One per line, or comma-separated. Case and extra spacing are ignored." required={form.clueRequiresSolution} />
               </label>
             </div>
           ) : null}
@@ -413,10 +484,12 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
               <textarea className="textarea" value={form.hintText} onChange={(e) => update('hintText', e.target.value)} />
             </label>
             <div className="form">
-              <label>
-                <div className="label">Hint image URL, optional</div>
-                <input className="input" value={form.hintImageUrl} onChange={(e) => update('hintImageUrl', e.target.value)} />
-              </label>
+              <ImageField
+                adminFetch={adminFetch}
+                label="Hint image"
+                value={form.hintImageUrl}
+                onChange={(value) => update('hintImageUrl', value)}
+              />
               <label>
                 <div className="label">Hint penalty</div>
                 <input className="input" value={form.hintPenalty} onChange={(e) => update('hintPenalty', e.target.value)} inputMode="numeric" />
@@ -425,10 +498,106 @@ function CreateStation({ nextOrder, onCreate }: { nextOrder: number; onCreate: (
           </div>
         </section>
 
-        <button className="button" disabled={saving} type="submit">{saving ? 'Creating…' : 'Create station'}</button>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={form.isActive} onChange={(e) => update('isActive', e.target.checked)} />
+          <span>Station is active</span>
+        </label>
+
+        <button className="button" disabled={saving} type="submit">{saving ? 'Saving…' : station ? 'Save station changes' : 'Create station'}</button>
       </form>
     </section>
   );
+}
+
+function ImageField({ adminFetch, label, value, onChange }: { adminFetch: AdminFetch; label: string; value: string; onChange: (value: string) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setError('');
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setError('Use a PNG, JPG, WEBP, or GIF image.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError('Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const base64 = await fileToDataUrl(file);
+      const response = await adminFetch('/api/admin/images', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'upload',
+          fileName: file.name,
+          contentType: file.type,
+          base64,
+        }),
+      });
+      const payload = await response.json();
+      if (!payload.ok) {
+        setError(payload.error || 'Could not upload image.');
+        return;
+      }
+      onChange(payload.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not upload image.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="image-field">
+      <label>
+        <div className="label">{label} URL, optional</div>
+        <input className="input" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Paste an image URL or upload a new image below" />
+      </label>
+      <div className="row image-actions">
+        <label className="button secondary compact-button upload-button">
+          {uploading ? 'Uploading…' : 'Upload image'}
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={upload} disabled={uploading} />
+        </label>
+        {value ? <button className="button secondary compact-button" type="button" onClick={() => onChange('')}>Remove image</button> : null}
+        {value ? <a className="button secondary compact-button" href={value} target="_blank" rel="noreferrer">Open image</a> : null}
+      </div>
+      <p className="small muted">Uploads are limited to 5 MB. Supabase-hosted images removed from an existing station are deleted after you save.</p>
+      {error ? <p className="notice error small compact-notice">{error}</p> : null}
+    </div>
+  );
+}
+
+function stationToForm(station: Station | null, nextOrder: number) {
+  return {
+    sortOrder: String(station?.order || nextOrder),
+    points: String(station?.points ?? 10),
+    title: station?.title || '',
+    body: station?.body || '',
+    imageUrl: station?.imageUrl || '',
+    clueRequiresSolution: Boolean(station?.clueRequiresSolution),
+    cluePromptText: station?.cluePromptText || '',
+    cluePromptImageUrl: station?.cluePromptImageUrl || '',
+    clueAnswerKeysText: station?.clueAnswerKeys?.join('\n') || '',
+    hintText: station?.hintText || '',
+    hintImageUrl: station?.hintImageUrl || '',
+    hintPenalty: String(station?.hintPenalty ?? 3),
+    isActive: station?.isActive ?? true,
+  };
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read image file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function RestoreTeams({ teams }: { teams: Team[] }) {
