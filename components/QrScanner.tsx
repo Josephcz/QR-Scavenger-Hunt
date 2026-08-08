@@ -12,6 +12,18 @@ export function QrScanner() {
   const controlsRef = useRef<ScannerControls | null>(null);
   const handledRef = useRef(false);
 
+  function openScanner() {
+    // A successful scan deliberately leaves handledRef=true until the scanner
+    // closes, preventing duplicate decode callbacks for the same QR frame.
+    // Reset it only when starting a brand-new scanner session.
+    controlsRef.current?.stop();
+    controlsRef.current = null;
+    handledRef.current = false;
+    setError('');
+    setStarting(false);
+    setOpen(true);
+  }
+
   function closeScanner() {
     controlsRef.current?.stop();
     controlsRef.current = null;
@@ -90,7 +102,7 @@ export function QrScanner() {
 
   return (
     <>
-      <button className="scanner-fab" type="button" onClick={() => setOpen(true)} aria-label="Scan QR code">
+      <button className="scanner-fab" type="button" onClick={openScanner} aria-label="Scan QR code">
         <QrIcon />
         <span>Scan QR</span>
       </button>
