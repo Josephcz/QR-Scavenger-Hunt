@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (stationError) return res.status(500).json({ ok: false, error: stationError.message });
     if (!station) return res.status(404).json({ ok: false, error: 'Station not found.' });
-    if (!station.hint_text && !station.hint_image_url) {
+    if (!station.hint_text && !station.hint_image_url && !station.hint_audio_url) {
       return res.status(404).json({ ok: false, error: 'No extra hint is available for this station.' });
     }
 
@@ -49,6 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       hint: {
         text: station.hint_text,
         imageUrl: station.hint_image_url,
+        audioUrl: station.hint_audio_url,
         penalty: station.hint_penalty || 0,
       },
       alreadyUsed: row?.already_used ?? false,

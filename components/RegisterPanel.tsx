@@ -3,7 +3,7 @@ import { SupportRecoveryText } from './SupportFooter';
 import { CachedTeam, setCachedTeam } from './teamStore';
 
 type Props = {
-  onTeamReady: (team: CachedTeam) => void;
+  onTeamReady: (team: CachedTeam, mode: 'created' | 'recovered') => void;
   scanWaiting?: boolean;
 };
 
@@ -32,7 +32,7 @@ export function RegisterPanel({ onTeamReady, scanWaiting }: Props) {
 
       const team: CachedTeam = payload.team;
       setCachedTeam(team);
-      onTeamReady(team);
+      onTeamReady(team, payload.mode === 'recovered' ? 'recovered' : 'created');
     } catch {
       setError('Network error. Try again.');
     } finally {

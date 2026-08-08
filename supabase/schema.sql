@@ -39,6 +39,7 @@ create table if not exists public.stations (
   -- Optional paid hint. Revealed after a team confirms spending hint_penalty points.
   hint_text text,
   hint_image_url text,
+  hint_audio_url text,
   hint_penalty integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -196,6 +197,10 @@ $$;
 -- You can also create this manually in Supabase Storage and make it public.
 insert into storage.buckets (id, name, public)
 values ('hunt-images', 'hunt-images', true)
+on conflict (id) do update set public = true;
+
+insert into storage.buckets (id, name, public)
+values ('hunt-audio', 'hunt-audio', true)
 on conflict (id) do update set public = true;
 
 -- Do not expose mutation functions through anon/authenticated Supabase REST clients.

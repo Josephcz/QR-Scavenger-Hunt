@@ -4,6 +4,7 @@ import { assertAdmin, methodNotAllowed } from '../../../lib/http';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
 const IMAGE_BUCKET = 'hunt-images';
+const AUDIO_BUCKET = 'hunt-audio';
 const IMAGE_FIELDS = ['imageUrl', 'cluePromptImageUrl', 'hintImageUrl'] as const;
 type ImageField = (typeof IMAGE_FIELDS)[number];
 
@@ -20,6 +21,7 @@ type StationBody = {
   clueAnswerKeys?: string[];
   hintText?: string;
   hintImageUrl?: string;
+  hintAudioUrl?: string;
   hintPenalty?: number;
   isActive?: boolean;
 };
@@ -28,6 +30,7 @@ type ImageUrlMap = Record<ImageField, string | null>;
 
 type ValidatedStationValues = {
   imageUrls: ImageUrlMap;
+  audioUrl: string | null;
   dbPayload: Record<string, unknown>;
 };
 
@@ -66,10 +69,20 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
     const validated = validateStationBody(body);
     if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
-    const reuseError = await findImageReuseError(validated.values.imageUrls, null);
+    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrl, null);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
 
     const sortOrder = Number(validated.values.dbPayload.sort_order);
+    const { data: orderConflict, error: orderConflictError } = await supabaseAdmin
+      .from('stations')
+      .select('id,title')
+      .eq('sort_order', sortOrder)
+      .maybeSingle();
+    if (orderConflictError) return res.status(500).json({ ok: false, error: orderConflictError.message });
+    if (orderConflict) {
+      return res.status(409).json({ ok: false, error: `Station order ${sortOrder} is already used by “${orderConflict.title}”. Choose a different order.` });
+    }
+
     const maxAttempts = sortOrder === 0 ? 1 : 5;
     for (let attempts = 0; attempts < maxAttempts; attempts += 1) {
       const code = sortOrder === 0 ? null : randomCode('ST', 8);
@@ -89,6 +102,9 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
         return res.status(200).json({ ok: true, station: publicAdminStation(data, baseUrl) });
       }
 
+      if (error && isSortOrderDuplicate(error.message)) {
+        return res.status(409).json({ ok: false, error: friendlyStationError(error.message) });
+      }
       if (sortOrder === 0 || !error?.message.includes('duplicate key')) {
         return res.status(500).json({ ok: false, error: friendlyStationError(error?.message || 'Could not create station.') });
       }
@@ -118,7 +134,7 @@ async function updateStation(req: NextApiRequest, res: NextApiResponse) {
     const validated = validateStationBody(body);
     if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
-    const reuseError = await findImageReuseError(validated.values.imageUrls, stationId);
+    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrl, stationId);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
 
     const nextOrder = Number(validated.values.dbPayload.sort_order);
@@ -141,9 +157,12 @@ async function updateStation(req: NextApiRequest, res: NextApiResponse) {
       .select('*')
       .single();
 
-    if (error) return res.status(500).json({ ok: false, error: friendlyStationError(error.message) });
+    if (error) {
+      const status = isSortOrderDuplicate(error.message) ? 409 : 500;
+      return res.status(status).json({ ok: false, error: friendlyStationError(error.message) });
+    }
 
-    const deletionWarnings = await deleteRemovedSupabaseImages(existing, data);
+    const deletionWarnings = await deleteRemovedSupabaseMedia(existing, data);
     const baseUrl = requestOrigin(req);
     return res.status(200).json({
       ok: true,
@@ -170,6 +189,7 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
   const imageUrl = cleanOptionalString(body.imageUrl);
   const cluePromptImageUrl = cleanOptionalString(body.cluePromptImageUrl);
   const hintImageUrl = cleanOptionalString(body.hintImageUrl);
+  const hintAudioUrl = cleanOptionalString(body.hintAudioUrl);
 
   if (!Number.isInteger(sortOrder) || sortOrder < 0) {
     return { error: 'Station order must be zero or a positive integer.' };
@@ -195,6 +215,7 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
 
   return {
     imageUrls,
+    audioUrl: hintAudioUrl,
     dbPayload: {
       sort_order: sortOrder,
       title: body.title.trim(),
@@ -212,6 +233,7 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
       hint_answer_key: null,
       hint_text: cleanOptionalString(body.hintText),
       hint_image_url: hintImageUrl,
+      hint_audio_url: hintAudioUrl,
       hint_penalty: hintPenalty,
       is_active: sortOrder === 0 ? true : body.isActive !== false,
     },
@@ -245,13 +267,13 @@ function duplicateSubmittedImageError(imageUrls: ImageUrlMap) {
   return '';
 }
 
-async function findImageReuseError(imageUrls: ImageUrlMap, allowedStationId: string | null) {
+async function findMediaReuseError(imageUrls: ImageUrlMap, audioUrl: string | null, allowedStationId: string | null) {
   const submitted = new Set(Object.values(imageUrls).filter(Boolean) as string[]);
-  if (!submitted.size) return '';
+  if (!submitted.size && !audioUrl) return '';
 
   const { data, error } = await supabaseAdmin
     .from('stations')
-    .select('id,title,image_url,clue_prompt_image_url,hint_image_url');
+    .select('id,title,image_url,clue_prompt_image_url,hint_image_url,hint_audio_url');
 
   if (error) return error.message;
 
@@ -267,22 +289,35 @@ async function findImageReuseError(imageUrls: ImageUrlMap, allowedStationId: str
         return `That image URL is already used as the ${label} for “${station.title}”. Reusing images is blocked so deletion is safe.`;
       }
     }
+    if (audioUrl && station.hint_audio_url === audioUrl) {
+      return `That audio URL is already used by “${station.title}”. Reusing uploaded audio is blocked so deletion is safe.`;
+    }
   }
 
   return '';
 }
 
-async function deleteRemovedSupabaseImages(oldStation: any, newStation: any) {
+async function deleteRemovedSupabaseMedia(oldStation: any, newStation: any) {
   const oldUrls = stationImageUrls(oldStation);
   const newUrls = new Set(stationImageUrls(newStation));
   const warnings: string[] = [];
 
   for (const oldUrl of oldUrls) {
     if (newUrls.has(oldUrl)) continue;
-    const path = storagePathFromPublicUrl(oldUrl);
+    const path = storagePathFromPublicUrl(oldUrl, IMAGE_BUCKET);
     if (!path) continue;
     const { error } = await supabaseAdmin.storage.from(IMAGE_BUCKET).remove([path]);
     if (error) warnings.push(`Could not delete old image ${path}: ${error.message}`);
+  }
+
+  const oldAudioUrl = oldStation.hint_audio_url as string | null;
+  const newAudioUrl = newStation.hint_audio_url as string | null;
+  if (oldAudioUrl && oldAudioUrl !== newAudioUrl) {
+    const path = storagePathFromPublicUrl(oldAudioUrl, AUDIO_BUCKET);
+    if (path) {
+      const { error } = await supabaseAdmin.storage.from(AUDIO_BUCKET).remove([path]);
+      if (error) warnings.push(`Could not delete old audio ${path}: ${error.message}`);
+    }
   }
 
   return warnings;
@@ -292,15 +327,19 @@ function stationImageUrls(station: any) {
   return [station.image_url, station.clue_prompt_image_url, station.hint_image_url].filter(Boolean) as string[];
 }
 
-function storagePathFromPublicUrl(url: string) {
+function storagePathFromPublicUrl(url: string, bucket: string) {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
-  if (!supabaseUrl || !url.startsWith(`${supabaseUrl}/storage/v1/object/public/${IMAGE_BUCKET}/`)) return null;
-  const rawPath = url.slice(`${supabaseUrl}/storage/v1/object/public/${IMAGE_BUCKET}/`.length);
+  if (!supabaseUrl || !url.startsWith(`${supabaseUrl}/storage/v1/object/public/${bucket}/`)) return null;
+  const rawPath = url.slice(`${supabaseUrl}/storage/v1/object/public/${bucket}/`.length);
   return decodeURIComponent(rawPath.split('?')[0] || '');
 }
 
+function isSortOrderDuplicate(message: string) {
+  return message.includes('stations_sort_order_key') || (message.includes('duplicate key') && message.includes('sort_order'));
+}
+
 function friendlyStationError(message: string) {
-  if (message.includes('stations_sort_order_key') || (message.includes('duplicate key') && message.includes('sort_order'))) {
+  if (isSortOrderDuplicate(message)) {
     return 'Another station already uses that station order. Pick a different order first.';
   }
   return message;
@@ -338,6 +377,7 @@ function publicAdminStation(station: any, baseUrl: string) {
     clueAnswerKeys: station.clue_answer_keys || [],
     hintText: station.hint_text,
     hintImageUrl: station.hint_image_url,
+    hintAudioUrl: station.hint_audio_url,
     hintPenalty: station.hint_penalty,
     isActive: station.is_active,
     qrUrl,

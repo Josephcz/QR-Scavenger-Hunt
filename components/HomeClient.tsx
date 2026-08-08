@@ -19,6 +19,8 @@ export function HomeClient() {
   const [team, setTeam] = useState<CachedTeam | null>(null);
   const [checked, setChecked] = useState(false);
   const [statusError, setStatusError] = useState('');
+  const [showRecoveryCode, setShowRecoveryCode] = useState(false);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   useEffect(() => {
     const cached = getCachedTeam();
@@ -50,10 +52,29 @@ export function HomeClient() {
     setTeam(nextTeam);
   }
 
+  function handleTeamReady(nextTeam: CachedTeam, mode: 'created' | 'recovered') {
+    setTeam(nextTeam);
+    setShowRecoveryCode(mode === 'created');
+    setRecoveryCopied(false);
+  }
+
+  async function copyRecoveryCode() {
+    if (!team?.recoveryCode) return;
+    try {
+      await navigator.clipboard.writeText(team.recoveryCode);
+      setRecoveryCopied(true);
+      window.setTimeout(() => setRecoveryCopied(false), 1800);
+    } catch {
+      window.prompt('Copy your recovery code:', team.recoveryCode);
+    }
+  }
+
   function signOut() {
     clearCachedTeam();
     setTeam(null);
     setStatusError('');
+    setShowRecoveryCode(false);
+    setRecoveryCopied(false);
     void router.replace('/');
   }
 
@@ -111,14 +132,30 @@ export function HomeClient() {
                 <div className="notice error">This QR link is missing a station code or scan token. Please scan the printed QR code again.</div>
               ) : null}
             </section>
-            <RegisterPanel onTeamReady={updateTeam} scanWaiting={hasValidStationLink} />
+            <RegisterPanel onTeamReady={handleTeamReady} scanWaiting={hasValidStationLink} />
           </div>
         ) : (
           <>
-            <div className="notice warning recovery-banner">
-              <strong>Keep your recovery code safe:</strong> <span className="code">{team.recoveryCode}</span>
-              <span className="small"> Take a screenshot or save it somewhere outside this browser.</span>
-            </div>
+            {showRecoveryCode ? (
+              <div className="notice warning recovery-banner">
+                <div className="recovery-banner-main">
+                  <div>
+                    <strong>Save your recovery code now.</strong>
+                    <div className="small" style={{ marginTop: 5 }}>Take a screenshot or keep it somewhere outside this browser. It will not stay on screen during the hunt.</div>
+                  </div>
+                  <div className="recovery-code-row">
+                    <span className="code recovery-code-value">{team.recoveryCode}</span>
+                    <button className="icon-button" type="button" onClick={copyRecoveryCode} aria-label="Copy recovery code" title="Copy recovery code">
+                      <CopyIcon />
+                    </button>
+                  </div>
+                </div>
+                <div className="row recovery-banner-actions">
+                  {recoveryCopied ? <span className="small success-text">Copied</span> : null}
+                  <button className="button secondary compact-button" type="button" onClick={() => setShowRecoveryCode(false)}>I’ve saved it</button>
+                </div>
+              </div>
+            ) : null}
             {hasStationQuery && !hasValidStationLink ? (
               <div className="notice error" style={{ marginBottom: 16 }}>This QR link is incomplete. Use the in-page scanner to scan the printed code again.</div>
             ) : null}
@@ -134,5 +171,14 @@ export function HomeClient() {
       </div>
       <QrScanner />
     </main>
+  );
+}
+
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+      <path fill="currentColor" d="M8 7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V7Zm2 0v9h7V7h-7ZM5 8h1v9a3 3 0 0 0 3 3h6v1H9a4 4 0 0 1-4-4V8Z"/>
+    </svg>
   );
 }

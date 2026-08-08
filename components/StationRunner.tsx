@@ -45,6 +45,7 @@ type ScanState = {
 type HintState = {
   text?: string;
   imageUrl?: string;
+  audioUrl?: string;
   penalty: number;
 };
 
@@ -340,6 +341,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
         <div className="notice warning" style={{ marginTop: 14 }}>
           {hint.text ? <div style={{ whiteSpace: 'pre-wrap' }}>{hint.text}</div> : null}
           {hint.imageUrl ? <img className="hint-image" src={hint.imageUrl} alt="Extra hint visual" /> : null}
+          {hint.audioUrl ? <audio className="hint-audio" controls preload="none" src={hint.audioUrl}>Your browser does not support audio playback.</audio> : null}
         </div>
       ) : null}
 

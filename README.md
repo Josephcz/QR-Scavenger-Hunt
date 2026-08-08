@@ -12,7 +12,7 @@ A Vercel/Next.js Pages Router scavenger hunt backed by Supabase.
 - Scanning the correct next QR immediately awards that station's points and reveals that station's clue for the following QR.
 - Scanning an older or future QR sends the team back to the clue they are currently allowed to see.
 - A clue may optionally be hidden behind a text/image solve prompt with multiple accepted answers.
-- A station may also have a separate paid hint. The first reveal can deduct points; later “Show hint again” requests do not deduct again or ask for confirmation.
+- A station may also have a separate paid hint containing text, image, and/or audio. The first reveal can deduct points; later “Show hint again” requests do not deduct again or ask for confirmation. Hint content is fetched from the server only when requested and is not stored in localStorage.
 - The highest active station with order greater than 0 is the finish station and shows congratulations + leaderboard.
 
 ## Participant QR scanner
@@ -31,7 +31,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-This version adds QR-scanner/generator dependencies. The returned project intentionally omits the old `package-lock.json`; run `npm install` once to generate a lockfile that matches the new dependencies, then commit that regenerated lockfile.
+The included `package-lock.json` reflects the current QR-scanner/generator dependencies.
 
 Fill `.env.local`:
 
@@ -52,6 +52,8 @@ Use the Supabase **service role** key, not the anon key. Keep the service role k
 ## Database setup
 
 ### Existing database
+
+For this update, run `supabase/migration-audio-hints.sql` once. It adds `stations.hint_audio_url` and creates the public `hunt-audio` bucket.
 
 If you already applied `migration-edit-stations-and-storage.sql`, run only:
 
@@ -93,6 +95,7 @@ The admin dashboard can:
 - view leaderboard and team recovery codes
 - create and edit stations
 - upload images (PNG/JPG/WEBP/GIF, max 5 MB) to the public `hunt-images` Supabase Storage bucket
+- upload paid-hint audio (MP3/M4A/WAV/OGG/WEBM, max 5 MB) to the public `hunt-audio` bucket
 - use external image URLs instead of uploads
 - copy/open hunt and station URLs
 - download QR stations as PNG or SVG
@@ -114,17 +117,17 @@ Each station has:
 - `clue_requires_solution`: optionally hide the main clue until the prompt is solved
 - `clue_prompt_text` / `clue_prompt_image_url`
 - `clue_answer_keys`: multiple case-insensitive accepted answers
-- `hint_text` / `hint_image_url`: optional paid hint
+- `hint_text` / `hint_image_url` / `hint_audio_url`: optional paid hint
 - `hint_penalty`: one-time score deduction for first hint reveal
 
-## Images
+## Images and audio
 
-Admin uploads go through the server-side `/api/admin/images` route using the Supabase service role key.
+Admin image uploads go through `/api/admin/images`; paid-hint audio uploads go through `/api/admin/audio`. Both use the Supabase service role key server-side.
 
-- binary image size is capped at 5 MB
+- image and audio uploads are each capped at 5 MB
 - the API body allowance is larger because Base64 encoding expands the request size
-- when an existing Supabase-hosted image is removed/replaced and the station is successfully saved, the old object is deleted from Storage
-- image URL reuse between stations/fields is blocked to keep deletion ownership unambiguous
+- when an existing Supabase-hosted image/audio file is removed or replaced and the station is successfully saved, the old object is deleted from Storage
+- image/audio URL reuse between stations is blocked to keep deletion ownership unambiguous
 
 ## Production build
 

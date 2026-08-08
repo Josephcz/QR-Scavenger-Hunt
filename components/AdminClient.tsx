@@ -26,6 +26,7 @@ type Station = {
   clueAnswerKeys: string[];
   hintText?: string | null;
   hintImageUrl?: string | null;
+  hintAudioUrl?: string | null;
   hintPenalty: number;
   isActive: boolean;
   qrUrl: string;
@@ -44,6 +45,7 @@ type StationPayload = {
   clueAnswerKeys: string[];
   hintText: string;
   hintImageUrl: string;
+  hintAudioUrl: string;
   hintPenalty: number;
   isActive: boolean;
 };
@@ -53,6 +55,8 @@ type AdminFetch = (path: string, init?: RequestInit, overridePassword?: string) 
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
+const ALLOWED_AUDIO_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm']);
 
 export function AdminClient() {
   const [password, setPassword] = useState('');
@@ -153,7 +157,7 @@ export function AdminClient() {
       return;
     }
 
-    const warningText = result.deletionWarnings?.length ? ` Old image cleanup warning: ${result.deletionWarnings.join(' ')}` : '';
+    const warningText = result.deletionWarnings?.length ? ` Media cleanup warning: ${result.deletionWarnings.join(' ')}` : '';
     setCreatedMessage(`${isEdit ? 'Updated' : 'Created'} station #${result.station.order}: ${result.station.title}.${warningText}`);
     setEditingStation(null);
     await loadAll();
@@ -376,11 +380,12 @@ function Stations({ adminFetch, stations, onEdit }: { adminFetch: AdminFetch; st
                   {station.imageUrl ? <><br /><a href={station.imageUrl} target="_blank" rel="noreferrer">Open clue image</a></> : null}
                 </td>
                 <td className="small">
-                  {station.hintText || station.hintImageUrl ? (
+                  {station.hintText || station.hintImageUrl || station.hintAudioUrl ? (
                     <>
                       <span className="muted">Penalty:</span> -{station.hintPenalty}<br />
                       {station.hintText ? <div className="admin-preview">{station.hintText}</div> : null}
-                      {station.hintImageUrl ? <a href={station.hintImageUrl} target="_blank" rel="noreferrer">Open hint image</a> : null}
+                      {station.hintImageUrl ? <><a href={station.hintImageUrl} target="_blank" rel="noreferrer">Open hint image</a><br /></> : null}
+                      {station.hintAudioUrl ? <audio className="admin-audio" controls preload="none" src={station.hintAudioUrl}>Audio hint</audio> : null}
                     </>
                   ) : (
                     <span className="muted">None</span>
@@ -452,6 +457,7 @@ function StationForm({
         clueAnswerKeys,
         hintText: form.hintText,
         hintImageUrl: form.hintImageUrl,
+        hintAudioUrl: form.hintAudioUrl,
         hintPenalty: Number(form.hintPenalty),
         isActive: Number(form.sortOrder) === 0 ? true : form.isActive,
       });
@@ -528,7 +534,7 @@ function StationForm({
 
         <section className="nested-card">
           <div className="kicker">Optional paid hint</div>
-          <p className="small muted">This hint has no solve prompt. The team confirms spending points, then the hint is revealed. Leave both hint fields blank to disable it.</p>
+          <p className="small muted">This hint has no solve prompt. The team confirms spending points, then the hint is revealed. Leave all hint content fields blank to disable it.</p>
           <div className="grid">
             <label>
               <div className="label">Hint text, optional</div>
@@ -540,6 +546,12 @@ function StationForm({
                 label="Hint image"
                 value={form.hintImageUrl}
                 onChange={(value) => update('hintImageUrl', value)}
+              />
+              <AudioField
+                adminFetch={adminFetch}
+                label="Hint audio"
+                value={form.hintAudioUrl}
+                onChange={(value) => update('hintAudioUrl', value)}
               />
               <label>
                 <div className="label">Hint penalty</div>
@@ -624,6 +636,66 @@ function ImageField({ adminFetch, label, value, onChange }: { adminFetch: AdminF
   );
 }
 
+
+function AudioField({ adminFetch, label, value, onChange }: { adminFetch: AdminFetch; label: string; value: string; onChange: (value: string) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setError('');
+    if (!ALLOWED_AUDIO_TYPES.has(file.type)) {
+      setError('Use an MP3, M4A, WAV, OGG, or WEBM audio file.');
+      return;
+    }
+    if (file.size > MAX_AUDIO_BYTES) {
+      setError('Audio must be 5 MB or smaller.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const base64 = await fileToDataUrl(file);
+      const response = await adminFetch('/api/admin/audio', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'upload', fileName: file.name, contentType: file.type, base64 }),
+      });
+      const payload = await response.json();
+      if (!payload.ok) {
+        setError(payload.error || 'Could not upload audio.');
+        return;
+      }
+      onChange(payload.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not upload audio.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="image-field">
+      <label>
+        <div className="label">{label} URL, optional</div>
+        <input className="input" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Paste an audio URL or upload a new file below" />
+      </label>
+      <div className="row image-actions">
+        <label className="button secondary compact-button upload-button">
+          {uploading ? 'Uploading…' : 'Upload audio'}
+          <input type="file" accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,audio/ogg,audio/webm" onChange={upload} disabled={uploading} />
+        </label>
+        {value ? <button className="button secondary compact-button" type="button" onClick={() => onChange('')}>Remove audio</button> : null}
+      </div>
+      {value ? <audio className="admin-audio" controls preload="none" src={value}>Audio preview</audio> : null}
+      <p className="small muted">Uploads are limited to 5 MB. Supabase-hosted audio removed from an existing station is deleted after you save.</p>
+      {error ? <p className="notice error small compact-notice">{error}</p> : null}
+    </div>
+  );
+}
+
 function stationToForm(station: Station | null, nextOrder: number) {
   return {
     sortOrder: String(station ? station.order : nextOrder),
@@ -637,6 +709,7 @@ function stationToForm(station: Station | null, nextOrder: number) {
     clueAnswerKeysText: station?.clueAnswerKeys?.join('\n') || '',
     hintText: station?.hintText || '',
     hintImageUrl: station?.hintImageUrl || '',
+    hintAudioUrl: station?.hintAudioUrl || '',
     hintPenalty: String(station?.hintPenalty ?? 3),
     isActive: station ? station.isActive : true,
   };
@@ -691,6 +764,14 @@ function downloadBlob(blob: Blob, fileName: string) {
 
 function RestoreTeams({ teams }: { teams: Team[] }) {
   const [query, setQuery] = useState('');
+
+  async function copyRecoveryCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      window.prompt('Copy recovery code:', code);
+    }
+  }
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return teams;
@@ -721,7 +802,7 @@ function RestoreTeams({ teams }: { teams: Team[] }) {
             {filtered.map((team) => (
               <tr key={team.id}>
                 <td>{team.name}</td>
-                <td><span className="code inline-code">{team.recoveryCode}</span></td>
+                <td><span className="recovery-code-cell"><span className="code inline-code">{team.recoveryCode}</span><button className="icon-button mini-icon-button" type="button" onClick={() => copyRecoveryCode(team.recoveryCode)} aria-label={`Copy recovery code for ${team.name}`} title="Copy recovery code"><CopyIcon /></button></span></td>
                 <td>{team.score}</td>
                 <td>{team.completedOrder}</td>
                 <td>{new Date(team.updatedAt).toLocaleString()}</td>
@@ -731,5 +812,14 @@ function RestoreTeams({ teams }: { teams: Team[] }) {
         </table>
       </div>
     </section>
+  );
+}
+
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M8 7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V7Zm2 0v9h7V7h-7ZM5 8h1v9a3 3 0 0 0 3 3h6v1H9a4 4 0 0 1-4-4V8Z"/>
+    </svg>
   );
 }

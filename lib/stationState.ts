@@ -85,7 +85,7 @@ export function publicStation(station: any, clueUnlocked: boolean) {
     body: canShowClue ? station.body_markdown : '',
     imageUrl: canShowClue ? station.image_url : null,
     points: station.sort_order === 0 ? 0 : station.points,
-    hasHint: Boolean(station.hint_text || station.hint_image_url),
+    hasHint: Boolean(station.hint_text || station.hint_image_url || station.hint_audio_url),
     hintPenalty: station.hint_penalty || 0,
     clueRequiresSolution: requiresClueUnlock,
     clueUnlocked: canShowClue,
