@@ -1,20 +1,27 @@
 # QR Scavenger Hunt
 
-A basic Vercel/Next.js scavenger hunt app backed by Supabase.
+A Vercel/Next.js Pages Router scavenger hunt backed by Supabase.
 
-## Current game logic
+## Game flow
 
-- Teams register with a team name.
-- The browser stores the team id/device key in local storage.
-- Admins can recover a team using the recovery code shown in `/admin`.
-- QR URLs use `/?c=<station_code>&t=<scan_token>`.
-- Scanning the correct next QR code immediately awards that station's points.
-- The revealed station page is only the clue/info for the next location.
-- If a team scans an older QR code, they are sent back to their current revealed clue.
-- If a team scans a future QR code, they are also sent back to their current revealed clue.
-- The final active station, determined by highest `sort_order`, shows the congratulations screen and leaderboard.
-- Optional extra hints can be puzzle-gated: players may need to type the correct unlock string before seeing the actual hint.
-- Unlocking a hint can subtract points once. Showing the same hint again does not subtract again.
+- Teams register with a team name and receive a recovery code.
+- The browser stores the team id/device key in `localStorage`.
+- Opening `/` while signed in always restores the team's current clue.
+- **Station 0** is the start clue. It awards 0 points, has no QR code/code/token, and is reached from the base hunt URL.
+- The clue from station 0 leads players to QR station 1.
+- Scanning the correct next QR immediately awards that station's points and reveals that station's clue for the following QR.
+- Scanning an older or future QR sends the team back to the clue they are currently allowed to see.
+- A clue may optionally be hidden behind a text/image solve prompt with multiple accepted answers.
+- A station may also have a separate paid hint. The first reveal can deduct points; later “Show hint again” requests do not deduct again or ask for confirmation.
+- The highest active station with order greater than 0 is the finish station and shows congratulations + leaderboard.
+
+## Participant QR scanner
+
+The participant page has a persistent **Scan QR** button at the bottom of the screen. It opens the camera scanner in an overlay on the same page and navigates internally after a valid hunt QR is recognized.
+
+The scanner uses the open-source `@zxing/browser` package.
+
+Camera access requires the deployed site to use HTTPS. Vercel/custom domains normally satisfy this automatically. Localhost can be used for local development, although testing a phone camera is easiest against an HTTPS deployment.
 
 ## Local setup
 
@@ -24,10 +31,13 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Fill `.env.local` with your Supabase project values:
+This version adds QR-scanner/generator dependencies. The returned project intentionally omits the old `package-lock.json`; run `npm install` once to generate a lockfile that matches the new dependencies, then commit that regenerated lockfile.
+
+Fill `.env.local`:
 
 ```env
 NEXT_PUBLIC_EVENT_NAME="QR Scavenger Hunt"
+NEXT_PUBLIC_SUPPORT_PHONE="+420 123 456 789"
 
 SUPABASE_URL="https://YOUR-PROJECT-REF.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
@@ -35,29 +45,40 @@ SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"
 SCAVENGER_ADMIN_PASSWORD="change-me"
 ```
 
-Use the Supabase **service role** key, not the anon key. Keep it server-side only.
+`NEXT_PUBLIC_SUPPORT_PHONE` is intentionally public: participants see it as Call and WhatsApp support links.
+
+Use the Supabase **service role** key, not the anon key. Keep the service role key server-side only.
 
 ## Database setup
 
-For a new Supabase project, run:
+### Existing database
+
+If you already applied `migration-edit-stations-and-storage.sql`, run only:
+
+```txt
+supabase/migration-station-zero.sql
+```
+
+This migration:
+
+- allows `sort_order = 0`
+- forces station 0 to 0 points
+- allows station 0 to have no `code`/`scan_token`
+- requires normal QR stations (order 1+) to keep both QR credentials
+
+The migration intentionally does **not** invent start-clue content for you.
+
+After running it, open `/admin` and create **station order 0**. Existing station 1 remains your first physical QR code.
+
+### Fresh Supabase project
+
+Run:
 
 ```txt
 supabase/schema.sql
 ```
 
-For an existing database from the previous version, run:
-
-```txt
-supabase/migration-current-clue-puzzle-hints.sql
-```
-
-This migration drops the old `station_scans` table, adds the puzzle-hint columns, and replaces the SQL functions.
-
-Optional demo stations:
-
-```txt
-supabase/seed.sql
-```
+Optionally run `supabase/seed.sql` for demo data, including a sample station 0.
 
 ## Admin
 
@@ -67,41 +88,49 @@ Open:
 /admin
 ```
 
-QR URLs in the admin dashboard are generated from the current request domain, so they will use localhost locally and your real domain after deployment.
+The admin dashboard can:
 
-The admin page lets you:
+- view leaderboard and team recovery codes
+- create and edit stations
+- upload images (PNG/JPG/WEBP/GIF, max 5 MB) to the public `hunt-images` Supabase Storage bucket
+- use external image URLs instead of uploads
+- copy/open hunt and station URLs
+- download QR stations as PNG or SVG
 
-- view recovery codes
-- view the leaderboard
-- copy QR URLs
-- create stations
-- add revealed clue text/images
-- add optional puzzle-gated extra hints
+Station 0 is visually distinguished in **Stations & QR links**. It gets only the base hunt URL and no QR download buttons. Stations 1+ receive secure scan URLs and downloadable QR images.
+
+QR SVG is generated by your own authenticated Next.js admin API with the open-source `qrcode-svg` package. PNG output is rasterized locally in the admin browser from that SVG. No third-party QR-generation service receives your station URLs.
 
 ## Station fields
 
 Each station has:
 
-- `sort_order`: the sequence number
-- `code`: public station code in the QR URL
-- `scan_token`: hidden-ish QR token in the QR URL
-- `title`: title shown after scanning
-- `body_markdown`: revealed clue/info for the next station
-- `image_url`: optional revealed image
-- `points`: points awarded when this QR is scanned in sequence
-- `hint_prompt_text`: optional puzzle prompt shown before unlocking the extra hint
-- `hint_prompt_image_url`: optional image shown before unlocking the extra hint
-- `hint_answer_key`: optional required string to unlock the extra hint
-- `hint_text`: actual extra hint text shown after unlock
-- `hint_image_url`: actual extra hint image shown after unlock
-- `hint_penalty`: points subtracted once when the hint is first unlocked
+- `sort_order`: 0 for the start clue, 1+ for QR stations
+- `code` / `scan_token`: null for station 0; generated for QR stations
+- `title`
+- `body_markdown`: the clue leading to the next QR/location
+- `image_url`: optional clue image
+- `points`: awarded when a QR station is scanned in sequence; always 0 for station 0
+- `clue_requires_solution`: optionally hide the main clue until the prompt is solved
+- `clue_prompt_text` / `clue_prompt_image_url`
+- `clue_answer_keys`: multiple case-insensitive accepted answers
+- `hint_text` / `hint_image_url`: optional paid hint
+- `hint_penalty`: one-time score deduction for first hint reveal
 
-## Notes
+## Images
 
-The project uses Next.js Pages Router so it works with a `pages/` directory and `pages/api/*` API routes. It does not require the newer App Router.
+Admin uploads go through the server-side `/api/admin/images` route using the Supabase service role key.
 
-Run a production build with:
+- binary image size is capped at 5 MB
+- the API body allowance is larger because Base64 encoding expands the request size
+- when an existing Supabase-hosted image is removed/replaced and the station is successfully saved, the old object is deleted from Storage
+- image URL reuse between stations/fields is blocked to keep deletion ownership unambiguous
+
+## Production build
 
 ```bash
+npm run typecheck
 npm run build
 ```
+
+The project uses the Next.js Pages Router (`pages/` and `pages/api/*`).

@@ -1,7 +1,9 @@
 import { useRouter } from 'next/router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { QrScanner } from './QrScanner';
 import { RegisterPanel } from './RegisterPanel';
 import { StationRunner } from './StationRunner';
+import { SupportFooter } from './SupportFooter';
 import { CachedTeam, clearCachedTeam, getCachedTeam, setCachedTeam } from './teamStore';
 
 const eventName = process.env.NEXT_PUBLIC_EVENT_NAME || 'QR Scavenger Hunt';
@@ -12,7 +14,8 @@ export function HomeClient() {
   const rawToken = router.query.t;
   const code = typeof rawCode === 'string' ? rawCode : '';
   const token = typeof rawToken === 'string' ? rawToken : '';
-  const hasStationLink = Boolean(code || token);
+  const hasStationQuery = Boolean(code || token);
+  const hasValidStationLink = Boolean(code && token);
   const [team, setTeam] = useState<CachedTeam | null>(null);
   const [checked, setChecked] = useState(false);
   const [statusError, setStatusError] = useState('');
@@ -43,11 +46,6 @@ export function HomeClient() {
       .catch(() => undefined);
   }, []);
 
-  const subtitle = useMemo(() => {
-    if (hasStationLink) return 'Scan confirmed. Register or continue with your saved team.';
-    return 'Register your team, scan the first QR code, and follow each revealed clue in order.';
-  }, [hasStationLink]);
-
   function updateTeam(nextTeam: CachedTeam) {
     setTeam(nextTeam);
   }
@@ -56,6 +54,7 @@ export function HomeClient() {
     clearCachedTeam();
     setTeam(null);
     setStatusError('');
+    void router.replace('/');
   }
 
   if (!checked || !router.isReady) {
@@ -73,7 +72,7 @@ export function HomeClient() {
   }
 
   return (
-    <main className="page-shell">
+    <main className="page-shell participant-shell">
       <div className="container">
         <header className="header">
           <div className="brand">
@@ -94,47 +93,46 @@ export function HomeClient() {
 
         {statusError ? <p className="notice error small">{statusError}</p> : null}
 
-        {hasStationLink && team && code && token ? (
-          <StationRunner code={code} token={token} team={team} onTeamUpdate={updateTeam} />
-        ) : (
-          <div className="grid">
-            <section className="card">
-              <div className="kicker">Start</div>
+        {!team ? (
+          <div className="grid onboarding-grid">
+            <section className="card welcome-card">
+              <div className="kicker">Welcome to the hunt</div>
               <h1>{eventName}</h1>
-              <p>{subtitle}</p>
-              {team ? (
-                <div className="notice success">
-                  This browser is registered for <strong>{team.name}</strong>. Your recovery code is{' '}
-                  <span className="code">{team.recoveryCode}</span>. Keep it somewhere safe.
-                </div>
-              ) : null}
-              {hasStationLink && (!code || !token) ? (
-                <div className="notice error">This QR link is missing a station code or scan token. Please rescan the printed QR code.</div>
-              ) : null}
-              <div className="hr" />
-              <div className="row">
-                <span className="pill">QR only</span>
-                <span className="pill">No GPS</span>
-                <span className="pill">Scans award points</span>
-                <span className="pill">Extra hints can cost points</span>
+              <p>Register your team on this phone. You will receive a recovery code, then your first clue will appear and lead you to the first QR code.</p>
+              <div className="notice warning recovery-emphasis">
+                <strong>Save your recovery code.</strong> Take a screenshot or write it down. It is how you restore your team, score, and progress if this browser loses its saved data.
               </div>
+              <div className="steps">
+                <div><span className="step-number">1</span><span>Register your team.</span></div>
+                <div><span className="step-number">2</span><span>Save the recovery code somewhere safe.</span></div>
+                <div><span className="step-number">3</span><span>Follow the start clue and scan the first QR code using the scanner button below.</span></div>
+              </div>
+              {hasStationQuery && !hasValidStationLink ? (
+                <div className="notice error">This QR link is missing a station code or scan token. Please scan the printed QR code again.</div>
+              ) : null}
             </section>
-            {team && !hasStationLink ? (
-              <section className="card">
-                <div className="kicker">Ready</div>
-                <h2>Scan the first QR code</h2>
-                <p>Your team is saved on this device. Scan the next correct QR code to earn points and reveal the next clue.</p>
-                <div className="notice">
-                  Current score: <span className="score">{team.score}</span><br />
-                  Completed stations: <span className="score">{team.completedOrder}</span>
-                </div>
-              </section>
-            ) : (
-              <RegisterPanel onTeamReady={updateTeam} scanWaiting={hasStationLink} />
-            )}
+            <RegisterPanel onTeamReady={updateTeam} scanWaiting={hasValidStationLink} />
           </div>
+        ) : (
+          <>
+            <div className="notice warning recovery-banner">
+              <strong>Keep your recovery code safe:</strong> <span className="code">{team.recoveryCode}</span>
+              <span className="small"> Take a screenshot or save it somewhere outside this browser.</span>
+            </div>
+            {hasStationQuery && !hasValidStationLink ? (
+              <div className="notice error" style={{ marginBottom: 16 }}>This QR link is incomplete. Use the in-page scanner to scan the printed code again.</div>
+            ) : null}
+            {hasValidStationLink ? (
+              <StationRunner code={code} token={token} team={team} onTeamUpdate={updateTeam} />
+            ) : (
+              <StationRunner team={team} onTeamUpdate={updateTeam} />
+            )}
+          </>
         )}
+
+        <SupportFooter />
       </div>
+      <QrScanner />
     </main>
   );
 }

@@ -4,7 +4,7 @@ import { CachedTeam, setCachedTeam } from './teamStore';
 type Station = {
   id: string;
   order: number;
-  code: string;
+  code?: string | null;
   title: string;
   body: string;
   imageUrl?: string | null;
@@ -49,8 +49,8 @@ type HintState = {
 };
 
 type Props = {
-  code: string;
-  token: string;
+  code?: string;
+  token?: string;
   team: CachedTeam;
   onTeamUpdate: (team: CachedTeam) => void;
 };
@@ -69,7 +69,7 @@ function runCachedScan(params: { teamId: string; deviceKey: string; code: string
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   })
-    .then((response) => response.json())
+    .then((response) => readJsonResponse(response))
     .finally(() => {
       window.setTimeout(() => scanCache.delete(key), 2500);
     });
@@ -78,7 +78,17 @@ function runCachedScan(params: { teamId: string; deviceKey: string; code: string
   return request;
 }
 
-export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
+async function loadCurrentStation(params: { teamId: string; deviceKey: string }) {
+  const response = await fetch('/api/stations/current', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return readJsonResponse(response);
+}
+
+export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Props) {
+  const isScan = Boolean(code && token);
   const [state, setState] = useState<ScanState>({ loading: true, error: '' });
   const [hintLoading, setHintLoading] = useState(false);
   const [hint, setHint] = useState<HintState | null>(null);
@@ -89,7 +99,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
 
   useEffect(() => {
     let alive = true;
-    async function scan() {
+    async function loadStation() {
       setState({ loading: true, error: '' });
       setHint(null);
       setHintError('');
@@ -97,12 +107,9 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
       setUnlockError('');
 
       try {
-        const payload = await runCachedScan({
-          teamId: team.id,
-          deviceKey: team.deviceKey,
-          code,
-          token,
-        });
+        const payload = isScan
+          ? await runCachedScan({ teamId: team.id, deviceKey: team.deviceKey, code, token })
+          : await loadCurrentStation({ teamId: team.id, deviceKey: team.deviceKey });
         if (!alive) return;
 
         if (!payload.ok) {
@@ -134,17 +141,17 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           station: payload.station,
         });
       } catch {
-        if (alive) setState({ loading: false, error: 'Network error. Try scanning again.' });
+        if (alive) setState({ loading: false, error: isScan ? 'Network error. Try scanning again.' : 'Network error. Try reloading the page.' });
       }
     }
-    scan();
+    void loadStation();
     return () => {
       alive = false;
     };
-  }, [code, token, team.id, team.deviceKey]);
+  }, [code, token, isScan, team.id, team.deviceKey]);
 
   const pointsText = useMemo(() => {
-    if (!state.station) return '';
+    if (!state.station || state.station.order === 0) return '';
     return `${state.station.points} point${state.station.points === 1 ? '' : 's'}`;
   }, [state.station]);
 
@@ -161,7 +168,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
         body: JSON.stringify({
           teamId: team.id,
           deviceKey: team.deviceKey,
-          stationCode: state.station.code,
+          stationId: state.station.id,
           answer: unlockAnswer,
         }),
       });
@@ -189,12 +196,15 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
     event?.preventDefault();
     if (!state.station) return;
     const penalty = state.station.hintPenalty || 0;
-    const ok = window.confirm(
-      penalty > 0 && !state.hintAlreadyUsed
-        ? `Are you sure? Revealing this hint costs ${penalty} point${penalty === 1 ? '' : 's'}.`
-        : 'Reveal this extra hint?'
-    );
-    if (!ok) return;
+
+    if (!state.hintAlreadyUsed) {
+      const ok = window.confirm(
+        penalty > 0
+          ? `Are you sure? Revealing this hint costs ${penalty} point${penalty === 1 ? '' : 's'}.`
+          : 'Reveal this extra hint?'
+      );
+      if (!ok) return;
+    }
 
     setHintLoading(true);
     setHintError('');
@@ -205,7 +215,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
         body: JSON.stringify({
           teamId: team.id,
           deviceKey: team.deviceKey,
-          stationCode: state.station.code,
+          stationId: state.station.id,
         }),
       });
       const payload = await readJsonResponse(response);
@@ -229,9 +239,9 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
   if (state.loading) {
     return (
       <div className="card">
-        <div className="kicker">Station</div>
-        <h2>Checking QR code…</h2>
-        <p>Confirming your team, station order, and QR token.</p>
+        <div className="kicker">{isScan ? 'Station' : 'Current clue'}</div>
+        <h2>{isScan ? 'Checking QR code…' : 'Loading your clue…'}</h2>
+        <p>{isScan ? 'Confirming your team, station order, and QR token.' : 'Restoring your team’s current place in the hunt.'}</p>
       </div>
     );
   }
@@ -239,8 +249,8 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
   if (state.error) {
     return (
       <div className="card">
-        <div className="kicker">Station locked</div>
-        <h2>Not yet</h2>
+        <div className="kicker">{state.blocked ? 'Station locked' : 'Hunt'}</div>
+        <h2>{state.blocked ? 'Not yet' : 'Could not load clue'}</h2>
         <div className={`notice ${state.blocked ? 'warning' : 'error'}`}>{state.error}</div>
         <div className="footer-actions">
           <span className="pill">Team: {team.name}</span>
@@ -258,7 +268,7 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
       <div className="card hero-card">
         <div className="kicker">Finish</div>
         <h1>Congratulations, {team.name}!</h1>
-        <p>You scanned the final QR code and completed the scavenger hunt.</p>
+        <p>You completed the scavenger hunt.</p>
         {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
         <div className="row" style={{ marginBottom: 16 }}>
           <span className="pill">Final score: <span className="score">{state.score ?? team.score}</span></span>
@@ -273,12 +283,13 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
   }
 
   const clueLocked = station.clueRequiresSolution && !station.clueUnlocked;
+  const isStart = station.order === 0;
 
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
-        <span className="pill">Station #{station.order}</span>
-        <span className="pill">Scan value: {pointsText}</span>
+        <span className="pill">{isStart ? 'Start clue' : `Station #${station.order}`}</span>
+        {!isStart ? <span className="pill">Scan value: {pointsText}</span> : null}
         <span className="pill">Score: <span className="score">{state.score ?? team.score}</span></span>
       </div>
 
@@ -296,16 +307,9 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
           <form className="form compact-form" onSubmit={unlockClue}>
             <label>
               <div className="label">Answer</div>
-              <input
-                className="input"
-                value={unlockAnswer}
-                onChange={(event) => setUnlockAnswer(event.target.value)}
-                placeholder="Type the solution"
-              />
+              <input className="input" value={unlockAnswer} onChange={(event) => setUnlockAnswer(event.target.value)} placeholder="Type the solution" />
             </label>
-            <button className="button" disabled={unlockLoading} type="submit">
-              {unlockLoading ? 'Checking…' : 'Reveal clue'}
-            </button>
+            <button className="button" disabled={unlockLoading} type="submit">{unlockLoading ? 'Checking…' : 'Reveal clue'}</button>
           </form>
           {unlockError ? <p className="notice error small">{unlockError}</p> : null}
         </section>
@@ -320,9 +324,9 @@ export function StationRunner({ code, token, team, onTeamUpdate }: Props) {
         <section className="hint-card">
           <div className="kicker">Optional extra hint</div>
           {state.hintAlreadyUsed ? (
-            <p className="small muted">This hint was already unlocked for your team. You can show it again without losing more points.</p>
+            <p className="small muted">This hint was already unlocked for your team. Showing it again does not cost any more points.</p>
           ) : (
-            <p className="small muted">Reveal an extra hint{station.hintPenalty ? ` for ${station.hintPenalty} point${station.hintPenalty === 1 ? '' : 's'}` : ''}. No answer is required.</p>
+            <p className="small muted">Reveal an extra hint{station.hintPenalty ? ` for ${station.hintPenalty} point${station.hintPenalty === 1 ? '' : 's'}` : ''}.</p>
           )}
           <form className="form compact-form" onSubmit={getHint}>
             <button className="button secondary" disabled={hintLoading || Boolean(hint)} type="submit">
@@ -370,20 +374,12 @@ function Leaderboard({ rows, currentTeamName }: { rows: LeaderboardRow[]; curren
       <div className="table-wrap">
         <table>
           <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Team</th>
-              <th>Score</th>
-              <th>Stations</th>
-            </tr>
+            <tr><th>Rank</th><th>Team</th><th>Score</th><th>Stations</th></tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.rank}-${row.name}`} className={row.name === currentTeamName ? 'highlight-row' : ''}>
-                <td>{row.rank}</td>
-                <td>{row.name}</td>
-                <td>{row.score}</td>
-                <td>{row.completedOrder}</td>
+                <td>{row.rank}</td><td>{row.name}</td><td>{row.score}</td><td>{row.completedOrder}</td>
               </tr>
             ))}
           </tbody>

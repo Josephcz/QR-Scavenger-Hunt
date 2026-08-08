@@ -14,8 +14,8 @@ type Team = {
 type Station = {
   id: string;
   order: number;
-  code: string;
-  scanToken: string;
+  code: string | null;
+  scanToken: string | null;
   title: string;
   body: string;
   imageUrl?: string | null;
@@ -210,12 +210,12 @@ export function AdminClient() {
           </div>
 
           {tab === 'leaderboard' ? <Leaderboard teams={teams} /> : null}
-          {tab === 'stations' ? <Stations stations={stations} onEdit={openEditTab} /> : null}
+          {tab === 'stations' ? <Stations adminFetch={adminFetch} stations={stations} onEdit={openEditTab} /> : null}
           {tab === 'create' ? (
             <StationForm
               adminFetch={adminFetch}
               station={editingStation}
-              nextOrder={(stations.at(-1)?.order || 0) + 1}
+              nextOrder={stations.some((station) => station.order === 0) ? Math.max(0, ...stations.map((station) => station.order)) + 1 : 0}
               onCancel={() => {
                 setEditingStation(null);
                 setTab('stations');
@@ -271,7 +271,7 @@ function Leaderboard({ teams }: { teams: Team[] }) {
   );
 }
 
-function Stations({ stations, onEdit }: { stations: Station[]; onEdit: (station: Station) => void }) {
+function Stations({ adminFetch, stations, onEdit }: { adminFetch: AdminFetch; stations: Station[]; onEdit: (station: Station) => void }) {
   async function copyUrl(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -281,17 +281,46 @@ function Stations({ stations, onEdit }: { stations: Station[]; onEdit: (station:
     }
   }
 
+  async function downloadQr(station: Station, format: 'png' | 'svg') {
+    try {
+      const response = await adminFetch('/api/admin/qr', {
+        method: 'POST',
+        body: JSON.stringify({ stationId: station.id }),
+      });
+      const payload = await response.json();
+      if (!payload.ok || !payload.svg) {
+        throw new Error(payload.error || 'Could not generate QR code.');
+      }
+
+      const fileName = `${payload.fileBase || `station-${String(station.order).padStart(2, '0')}`}.${format}`;
+      if (format === 'svg') {
+        downloadBlob(new Blob([payload.svg], { type: 'image/svg+xml;charset=utf-8' }), fileName);
+        return;
+      }
+
+      const dataUrl = await svgToPngDataUrl(payload.svg, 1024);
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      window.alert(err instanceof Error ? `Could not generate QR code: ${err.message}` : 'Could not generate QR code.');
+    }
+  }
+
   return (
     <section>
       <h2>Stations & QR links</h2>
-      <p>Use the scan link for each QR code. This table includes the code, token, clue-gate answers, and paid-hint details needed to unlock or debug everything.</p>
+      <p>Station 0 is the start clue and uses the base hunt link only. Stations 1+ have secure scan links and downloadable QR codes. This table includes the values needed to unlock or debug the hunt.</p>
       <div className="table-wrap">
         <table className="stations-table">
           <thead>
             <tr>
               <th>#</th>
               <th>Station</th>
-              <th>QR link</th>
+              <th>Hunt / QR link</th>
               <th>Clue gate</th>
               <th>Clue</th>
               <th>Paid hint</th>
@@ -304,15 +333,29 @@ function Stations({ stations, onEdit }: { stations: Station[]; onEdit: (station:
               <tr key={station.id}>
                 <td>{station.order}</td>
                 <td>
-                  <strong>{station.title}</strong><br />
+                  <strong>{station.order === 0 ? 'Start clue · ' : ''}{station.title}</strong><br />
                   <span className="small muted">Points: <span className="score">{station.points}</span></span><br />
-                  <span className="small muted">Code: <span className="code inline-code">{station.code}</span></span><br />
-                  <span className="small muted">Token: <span className="code inline-code">{station.scanToken}</span></span>
+                  {station.order === 0 ? (
+                    <span className="small muted">Base hunt page — no station QR/code/token.</span>
+                  ) : (
+                    <>
+                      <span className="small muted">Code: <span className="code inline-code">{station.code}</span></span><br />
+                      <span className="small muted">Token: <span className="code inline-code">{station.scanToken}</span></span>
+                    </>
+                  )}
                 </td>
                 <td>
                   <div className="action-stack">
-                    <a className="button secondary compact-button" href={station.qrUrl} target="_blank" rel="noreferrer">Open scan link</a>
+                    <a className="button secondary compact-button" href={station.qrUrl} target="_blank" rel="noreferrer">{station.order === 0 ? 'Open hunt link' : 'Open scan link'}</a>
                     <button className="button secondary compact-button" type="button" onClick={() => copyUrl(station.qrUrl)}>Copy URL</button>
+                    {station.order === 0 ? (
+                      <span className="small muted start-link-note">Start clue — no QR is generated.</span>
+                    ) : (
+                      <>
+                        <button className="button secondary compact-button" type="button" onClick={() => downloadQr(station, 'png')}>Download QR (PNG)</button>
+                        <button className="button secondary compact-button" type="button" onClick={() => downloadQr(station, 'svg')}>Download QR (SVG)</button>
+                      </>
+                    )}
                   </div>
                 </td>
                 <td>
@@ -325,7 +368,7 @@ function Stations({ stations, onEdit }: { stations: Station[]; onEdit: (station:
                       <span className="muted">Answers:</span> {station.clueAnswerKeys.length ? station.clueAnswerKeys.map((answer) => <span key={answer} className="code inline-code answer-chip">{answer}</span>) : <span className="muted">None set</span>}
                     </div>
                   ) : (
-                    <span className="small muted">Shown immediately after scan</span>
+                    <span className="small muted">{station.order === 0 ? 'Shown immediately after registration / on the base hunt page' : 'Shown immediately after scan'}</span>
                   )}
                 </td>
                 <td className="small">
@@ -377,7 +420,14 @@ function StationForm({
   }, [station, nextOrder]);
 
   function update(field: keyof typeof form, value: string | boolean) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'sortOrder' && Number(value) === 0) {
+        next.points = '0';
+        next.isActive = true;
+      }
+      return next;
+    });
   }
 
   async function submit(event: FormEvent) {
@@ -392,7 +442,7 @@ function StationForm({
       await onSubmit({
         id: station?.id,
         sortOrder: Number(form.sortOrder),
-        points: Number(form.points),
+        points: Number(form.sortOrder) === 0 ? 0 : Number(form.points),
         title: form.title,
         body: form.body,
         imageUrl: form.imageUrl,
@@ -403,7 +453,7 @@ function StationForm({
         hintText: form.hintText,
         hintImageUrl: form.hintImageUrl,
         hintPenalty: Number(form.hintPenalty),
-        isActive: form.isActive,
+        isActive: Number(form.sortOrder) === 0 ? true : form.isActive,
       });
     } finally {
       setSaving(false);
@@ -415,7 +465,7 @@ function StationForm({
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2>{station ? `Edit station #${station.order}` : 'Create station'}</h2>
-          <p>Each QR scan awards the station points. The clue text/image should tell the team how to find the next QR. You can optionally hide that clue behind a small solve prompt, then add a separate paid hint.</p>
+          <p>Station 0 is the start clue: it uses the main hunt URL, awards 0 points, and has no QR. Stations 1+ award points when their QR is scanned. Each station's clue should lead the team to the next QR; you can optionally hide that clue behind a solve prompt and add a separate paid hint.</p>
         </div>
         {station ? <button className="button secondary" type="button" onClick={onCancel}>Cancel edit</button> : null}
       </div>
@@ -428,7 +478,8 @@ function StationForm({
           </label>
           <label>
             <div className="label">Points</div>
-            <input className="input" value={form.points} onChange={(e) => update('points', e.target.value)} inputMode="numeric" />
+            <input className="input" value={Number(form.sortOrder) === 0 ? '0' : form.points} onChange={(e) => update('points', e.target.value)} inputMode="numeric" disabled={Number(form.sortOrder) === 0} />
+            {Number(form.sortOrder) === 0 ? <div className="small muted">The start clue never awards points.</div> : null}
           </label>
         </div>
 
@@ -499,8 +550,8 @@ function StationForm({
         </section>
 
         <label className="checkbox-row">
-          <input type="checkbox" checked={form.isActive} onChange={(e) => update('isActive', e.target.checked)} />
-          <span>Station is active</span>
+          <input type="checkbox" checked={Number(form.sortOrder) === 0 ? true : form.isActive} onChange={(e) => update('isActive', e.target.checked)} disabled={Number(form.sortOrder) === 0} />
+          <span>{Number(form.sortOrder) === 0 ? 'Start clue is always active' : 'Station is active'}</span>
         </label>
 
         <button className="button" disabled={saving} type="submit">{saving ? 'Saving…' : station ? 'Save station changes' : 'Create station'}</button>
@@ -575,7 +626,7 @@ function ImageField({ adminFetch, label, value, onChange }: { adminFetch: AdminF
 
 function stationToForm(station: Station | null, nextOrder: number) {
   return {
-    sortOrder: String(station?.order || nextOrder),
+    sortOrder: String(station ? station.order : nextOrder),
     points: String(station?.points ?? 10),
     title: station?.title || '',
     body: station?.body || '',
@@ -587,7 +638,7 @@ function stationToForm(station: Station | null, nextOrder: number) {
     hintText: station?.hintText || '',
     hintImageUrl: station?.hintImageUrl || '',
     hintPenalty: String(station?.hintPenalty ?? 3),
-    isActive: station?.isActive ?? true,
+    isActive: station ? station.isActive : true,
   };
 }
 
@@ -598,6 +649,44 @@ function fileToDataUrl(file: File) {
     reader.onerror = () => reject(new Error('Could not read image file.'));
     reader.readAsDataURL(file);
   });
+}
+
+async function svgToPngDataUrl(svg: string, size: number) {
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    const loaded = new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Could not rasterize QR code.'));
+    });
+    image.src = url;
+    await loaded;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas is not available in this browser.');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, size, size);
+    context.drawImage(image, 0, 0, size, size);
+    return canvas.toDataURL('image/png');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function RestoreTeams({ teams }: { teams: Team[] }) {

@@ -19,6 +19,23 @@ insert into public.stations (
 )
 values
   (
+    0,
+    null,
+    null,
+    'Start Here',
+    'Your first QR code is waiting near the event welcome sign.',
+    null,
+    0,
+    false,
+    null,
+    null,
+    '{}'::text[],
+    'Look near the main entrance.',
+    null,
+    0,
+    true
+  ),
+  (
     1,
     'ST-A7K2P9QX',
     'scan_3kfpO2YxKbrGpjqN',

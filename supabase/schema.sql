@@ -17,9 +17,9 @@ create table if not exists public.teams (
 
 create table if not exists public.stations (
   id uuid primary key default gen_random_uuid(),
-  sort_order integer not null unique check (sort_order > 0),
-  code text not null unique,
-  scan_token text not null unique,
+  sort_order integer not null unique check (sort_order >= 0),
+  code text unique,
+  scan_token text unique,
   title text not null,
   body_markdown text not null default '',
   image_url text,
@@ -42,7 +42,12 @@ create table if not exists public.stations (
   hint_penalty integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint stations_start_points_check check (sort_order <> 0 or points = 0),
+  constraint stations_qr_identity_check check (
+    (sort_order = 0 and code is null and scan_token is null)
+    or (sort_order > 0 and code is not null and scan_token is not null)
+  )
 );
 
 create table if not exists public.station_completions (

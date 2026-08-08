@@ -4,6 +4,16 @@ import { assertAdmin, methodNotAllowed } from '../../../lib/http';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
 const IMAGE_BUCKET = 'hunt-images';
+
+// A 5 MB binary image expands to roughly 6.7 MB as Base64, so allow enough JSON body headroom.
+// The decoded payload is still strictly capped at MAX_IMAGE_BYTES below.
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '8mb',
+    },
+  },
+};
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES: Record<string, string> = {
   'image/png': 'png',

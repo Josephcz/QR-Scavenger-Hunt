@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react';
+import { SupportRecoveryText } from './SupportFooter';
 import { CachedTeam, setCachedTeam } from './teamStore';
 
 type Props = {
@@ -10,13 +11,11 @@ export function RegisterPanel({ onTeamReady, scanWaiting }: Props) {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError('');
-    setSuccess('');
 
     try {
       const response = await fetch('/api/team/register', {
@@ -33,7 +32,6 @@ export function RegisterPanel({ onTeamReady, scanWaiting }: Props) {
 
       const team: CachedTeam = payload.team;
       setCachedTeam(team);
-      setSuccess(payload.mode === 'recovered' ? 'Team restored.' : 'Team created.');
       onTeamReady(team);
     } catch {
       setError('Network error. Try again.');
@@ -44,12 +42,10 @@ export function RegisterPanel({ onTeamReady, scanWaiting }: Props) {
 
   return (
     <div className="card">
-      <div className="kicker">Register</div>
+      <div className="kicker">Register or restore</div>
       <h2>Join the hunt</h2>
       {scanWaiting ? (
-        <div className="notice warning">
-          You scanned a station QR code, but this browser does not have a team saved yet. Register or restore your team first.
-        </div>
+        <div className="notice warning">You scanned a station QR code, but this browser does not have a team saved yet. Register or restore your team first; the scan will continue afterward.</div>
       ) : null}
       <form className="form" onSubmit={submit}>
         <label>
@@ -62,15 +58,13 @@ export function RegisterPanel({ onTeamReady, scanWaiting }: Props) {
             autoComplete="off"
           />
         </label>
-        <button className="button" disabled={loading} type="submit">
-          {loading ? 'Saving…' : 'Continue'}
-        </button>
+        <button className="button" disabled={loading} type="submit">{loading ? 'Saving…' : 'Continue'}</button>
       </form>
       {error ? <p className="notice error small">{error}</p> : null}
-      {success ? <p className="notice success small">{success}</p> : null}
-      <p className="small muted" style={{ marginTop: 14 }}>
-        Save your recovery code after registering. If this phone loses browser storage, an admin can look up the recovery code and you can enter it here.
-      </p>
+      <div className="notice" style={{ marginTop: 14 }}>
+        <strong>Lost your browser data?</strong>
+        <p className="small" style={{ margin: '6px 0 0' }}>Enter your recovery code above instead of a team name. <SupportRecoveryText /></p>
+      </div>
     </div>
   );
 }

@@ -64,14 +64,16 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
   try {
     const body = req.body as StationBody;
     const validated = validateStationBody(body);
-    if (!validated.ok) return res.status(400).json({ ok: false, error: validated.error });
+    if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
     const reuseError = await findImageReuseError(validated.values.imageUrls, null);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
 
-    for (let attempts = 0; attempts < 5; attempts += 1) {
-      const code = randomCode('ST', 8);
-      const scanToken = `scan_${randomSecret(12)}`;
+    const sortOrder = Number(validated.values.dbPayload.sort_order);
+    const maxAttempts = sortOrder === 0 ? 1 : 5;
+    for (let attempts = 0; attempts < maxAttempts; attempts += 1) {
+      const code = sortOrder === 0 ? null : randomCode('ST', 8);
+      const scanToken = sortOrder === 0 ? null : `scan_${randomSecret(12)}`;
       const { data, error } = await supabaseAdmin
         .from('stations')
         .insert({
@@ -87,7 +89,7 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
         return res.status(200).json({ ok: true, station: publicAdminStation(data, baseUrl) });
       }
 
-      if (!error?.message.includes('duplicate key')) {
+      if (sortOrder === 0 || !error?.message.includes('duplicate key')) {
         return res.status(500).json({ ok: false, error: friendlyStationError(error?.message || 'Could not create station.') });
       }
     }
@@ -114,15 +116,25 @@ async function updateStation(req: NextApiRequest, res: NextApiResponse) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Station not found.' });
 
     const validated = validateStationBody(body);
-    if (!validated.ok) return res.status(400).json({ ok: false, error: validated.error });
+    if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
     const reuseError = await findImageReuseError(validated.values.imageUrls, stationId);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
+
+    const nextOrder = Number(validated.values.dbPayload.sort_order);
+    const crossingFromStart = existing.sort_order === 0 && nextOrder > 0;
+    const crossingToStart = existing.sort_order > 0 && nextOrder === 0;
+    const qrIdentityUpdate = crossingToStart
+      ? { code: null, scan_token: null }
+      : crossingFromStart
+        ? { code: randomCode('ST', 8), scan_token: `scan_${randomSecret(12)}` }
+        : {};
 
     const { data, error } = await supabaseAdmin
       .from('stations')
       .update({
         ...validated.values.dbPayload,
+        ...qrIdentityUpdate,
         updated_at: new Date().toISOString(),
       })
       .eq('id', stationId)
@@ -159,8 +171,8 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
   const cluePromptImageUrl = cleanOptionalString(body.cluePromptImageUrl);
   const hintImageUrl = cleanOptionalString(body.hintImageUrl);
 
-  if (!Number.isInteger(sortOrder) || sortOrder < 1) {
-    return { error: 'Station order must be a positive integer.' };
+  if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+    return { error: 'Station order must be zero or a positive integer.' };
   }
   if (!Number.isInteger(points) || points < 0) {
     return { error: 'Points must be a non-negative integer.' };
@@ -190,7 +202,7 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
       image_url: imageUrl,
       question_text: '',
       answer_key: null,
-      points,
+      points: sortOrder === 0 ? 0 : points,
       clue_requires_solution: clueRequiresSolution,
       clue_prompt_text: clueRequiresSolution ? cleanOptionalString(body.cluePromptText) : null,
       clue_prompt_image_url: clueRequiresSolution ? cluePromptImageUrl : null,
@@ -201,7 +213,7 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
       hint_text: cleanOptionalString(body.hintText),
       hint_image_url: hintImageUrl,
       hint_penalty: hintPenalty,
-      is_active: body.isActive !== false,
+      is_active: sortOrder === 0 ? true : body.isActive !== false,
     },
   };
 }
@@ -308,7 +320,9 @@ function requestOrigin(req: NextApiRequest) {
 
 function publicAdminStation(station: any, baseUrl: string) {
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
-  const qrUrl = `${cleanBaseUrl}/?c=${encodeURIComponent(station.code)}&t=${encodeURIComponent(station.scan_token)}`;
+  const qrUrl = station.sort_order === 0
+    ? cleanBaseUrl
+    : `${cleanBaseUrl}/?c=${encodeURIComponent(station.code)}&t=${encodeURIComponent(station.scan_token)}`;
   return {
     id: station.id,
     order: station.sort_order,

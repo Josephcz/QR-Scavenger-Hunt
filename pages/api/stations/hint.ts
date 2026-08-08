@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 type HintBody = {
   teamId?: string;
   deviceKey?: string;
+  stationId?: string;
   stationCode?: string;
 };
 
@@ -16,13 +17,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { team, error: teamError } = await verifyTeam(body.teamId, body.deviceKey);
     if (!team) return res.status(401).json({ ok: false, error: teamError });
 
+    const stationId = body.stationId?.trim() || '';
     const stationCode = body.stationCode?.trim() || '';
-    const { data: station, error: stationError } = await supabaseAdmin
-      .from('stations')
-      .select('*')
-      .eq('code', stationCode)
-      .eq('is_active', true)
-      .maybeSingle();
+    if (!stationId && !stationCode) return res.status(400).json({ ok: false, error: 'Missing station identifier.' });
+
+    let stationQuery = supabaseAdmin.from('stations').select('*').eq('is_active', true);
+    stationQuery = stationId ? stationQuery.eq('id', stationId) : stationQuery.eq('code', stationCode);
+    const { data: station, error: stationError } = await stationQuery.maybeSingle();
 
     if (stationError) return res.status(500).json({ ok: false, error: stationError.message });
     if (!station) return res.status(404).json({ ok: false, error: 'Station not found.' });
