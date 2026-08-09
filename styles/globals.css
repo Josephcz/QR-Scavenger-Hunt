@@ -743,3 +743,23 @@ a:focus-visible {
 .arrival-admin-section {
   border-color: rgba(255,255,255,0.18);
 }
+
+
+/* Participant clue emphasis and spacing below scan/status messages. */
+.station-status-notice {
+  margin-bottom: 22px;
+}
+
+.clue-content {
+  max-width: 760px;
+  margin-top: 18px;
+}
+
+.clue-copy {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: clamp(19px, 2.5vw, 24px);
+  line-height: 1.65;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+}

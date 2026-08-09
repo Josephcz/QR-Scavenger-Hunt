@@ -326,7 +326,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
           <span className="pill">Score: <span className="score">{state.score ?? team.score}</span></span>
         </div>
 
-        {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
+        {state.message ? <div className={`${messageClass(state.messageKind)} station-status-notice`}>{state.message}</div> : null}
         <div className="kicker">About this place</div>
         <h1>{station.arrivalTitle || station.title}</h1>
         {station.arrivalImageUrl ? <img className="arrival-image" src={station.arrivalImageUrl} alt={station.arrivalTitle || station.title} /> : null}
@@ -348,7 +348,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
         <div className="kicker">Finish</div>
         <h1>Congratulations, {team.name}!</h1>
         <p>You completed the scavenger hunt.</p>
-        {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
+        {state.message ? <div className={`${messageClass(state.messageKind)} station-status-notice`}>{state.message}</div> : null}
         <div className="row" style={{ marginBottom: 16 }}>
           <span className="pill">Final score: <span className="score">{state.score ?? team.score}</span></span>
           <span className="pill">Final station: #{station.order}</span>
@@ -373,10 +373,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
         <span className="pill">Score: <span className="score">{state.score ?? team.score}</span></span>
       </div>
 
-      <div className="kicker">{team.name}</div>
-      <h2>{station.title}</h2>
-
-      {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
+      {state.message ? <div className={`${messageClass(state.messageKind)} station-status-notice`}>{state.message}</div> : null}
 
       {clueLocked ? (
         <section className="hint-card">
@@ -398,7 +395,12 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
         <>
           {station.imageUrl ? <img className="station-image" src={station.imageUrl} alt="Station visual clue" /> : null}
           {station.audioUrl ? <audio className="hint-audio" controls preload="none" src={station.audioUrl}>Your browser does not support audio playback.</audio> : null}
-          {station.body ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p> : null}
+          {station.body ? (
+            <section className="clue-content">
+              <div className="kicker">Clue</div>
+              <p className="clue-copy" style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p>
+            </section>
+          ) : null}
         </>
       )}
 
