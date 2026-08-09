@@ -17,12 +17,17 @@ type Station = {
   code: string | null;
   scanToken: string | null;
   title: string;
+  arrivalTitle?: string | null;
+  arrivalText?: string | null;
+  arrivalImageUrl?: string | null;
   body: string;
   imageUrl?: string | null;
+  audioUrl?: string | null;
   points: number;
   clueRequiresSolution: boolean;
   cluePromptText?: string | null;
   cluePromptImageUrl?: string | null;
+  cluePromptAudioUrl?: string | null;
   clueAnswerKeys: string[];
   hintText?: string | null;
   hintImageUrl?: string | null;
@@ -37,11 +42,16 @@ type StationPayload = {
   sortOrder: number;
   points: number;
   title: string;
+  arrivalTitle: string;
+  arrivalText: string;
+  arrivalImageUrl: string;
   body: string;
   imageUrl: string;
+  audioUrl: string;
   clueRequiresSolution: boolean;
   cluePromptText: string;
   cluePromptImageUrl: string;
+  cluePromptAudioUrl: string;
   clueAnswerKeys: string[];
   hintText: string;
   hintImageUrl: string;
@@ -193,7 +203,7 @@ export function AdminClient() {
             <div className="logo" />
             <div>
               <div className="kicker">Admin</div>
-              <div className="small muted">Teams, scan points, recovery codes, clue gates, paid hints, and QR links</div>
+              <div className="small muted">Teams, scan points, arrival information, clue gates, paid hints, and QR links</div>
             </div>
           </div>
           <div className="row">
@@ -325,6 +335,7 @@ function Stations({ adminFetch, stations, onEdit }: { adminFetch: AdminFetch; st
               <th>#</th>
               <th>Station</th>
               <th>Hunt / QR link</th>
+              <th>Arrival info</th>
               <th>Clue gate</th>
               <th>Clue</th>
               <th>Paid hint</th>
@@ -362,22 +373,35 @@ function Stations({ adminFetch, stations, onEdit }: { adminFetch: AdminFetch; st
                     )}
                   </div>
                 </td>
+                <td className="small">
+                  {station.arrivalTitle || station.arrivalText || station.arrivalImageUrl ? (
+                    <>
+                      <strong>{station.arrivalTitle || 'About this place'}</strong><br />
+                      {station.arrivalText ? <div className="admin-preview">{station.arrivalText}</div> : null}
+                      {station.arrivalImageUrl ? <a href={station.arrivalImageUrl} target="_blank" rel="noreferrer">Open arrival image</a> : null}
+                    </>
+                  ) : (
+                    <span className="muted">None — clue opens immediately</span>
+                  )}
+                </td>
                 <td>
                   {station.clueRequiresSolution ? (
                     <div className="small">
                       <strong>Hidden until solved</strong>
                       {station.cluePromptText ? <><br /><span className="muted">Prompt:</span> {station.cluePromptText}</> : null}
                       {station.cluePromptImageUrl ? <><br /><span className="muted">Prompt image:</span> <a href={station.cluePromptImageUrl} target="_blank" rel="noreferrer">Open</a></> : null}
+                      {station.cluePromptAudioUrl ? <><br /><span className="muted">Prompt audio:</span> <audio className="admin-audio" controls preload="none" src={station.cluePromptAudioUrl}>Prompt audio</audio></> : null}
                       <br />
                       <span className="muted">Answers:</span> {station.clueAnswerKeys.length ? station.clueAnswerKeys.map((answer) => <span key={answer} className="code inline-code answer-chip">{answer}</span>) : <span className="muted">None set</span>}
                     </div>
                   ) : (
-                    <span className="small muted">{station.order === 0 ? 'Shown immediately after registration / on the base hunt page' : 'Shown immediately after scan'}</span>
+                    <span className="small muted">{station.arrivalTitle || station.arrivalText || station.arrivalImageUrl ? 'Shown after the team continues past the arrival information' : station.order === 0 ? 'Shown immediately after registration / on the base hunt page' : 'Shown immediately after scan'}</span>
                   )}
                 </td>
                 <td className="small">
                   {station.body ? <div className="admin-preview">{station.body}</div> : <span className="muted">No text clue</span>}
                   {station.imageUrl ? <><br /><a href={station.imageUrl} target="_blank" rel="noreferrer">Open clue image</a></> : null}
+                  {station.audioUrl ? <audio className="admin-audio" controls preload="none" src={station.audioUrl}>Clue audio</audio> : null}
                 </td>
                 <td className="small">
                   {station.hintText || station.hintImageUrl || station.hintAudioUrl ? (
@@ -449,11 +473,16 @@ function StationForm({
         sortOrder: Number(form.sortOrder),
         points: Number(form.sortOrder) === 0 ? 0 : Number(form.points),
         title: form.title,
+        arrivalTitle: form.arrivalTitle,
+        arrivalText: form.arrivalText,
+        arrivalImageUrl: form.arrivalImageUrl,
         body: form.body,
         imageUrl: form.imageUrl,
+        audioUrl: form.audioUrl,
         clueRequiresSolution: form.clueRequiresSolution,
         cluePromptText: form.cluePromptText,
         cluePromptImageUrl: form.cluePromptImageUrl,
+        cluePromptAudioUrl: form.cluePromptAudioUrl,
         clueAnswerKeys,
         hintText: form.hintText,
         hintImageUrl: form.hintImageUrl,
@@ -471,7 +500,7 @@ function StationForm({
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2>{station ? `Edit station #${station.order}` : 'Create station'}</h2>
-          <p>Station 0 is the start clue: it uses the main hunt URL, awards 0 points, and has no QR. Stations 1+ award points when their QR is scanned. Each station's clue should lead the team to the next QR; you can optionally hide that clue behind a solve prompt and add a separate paid hint.</p>
+          <p>Station 0 is the start clue: it uses the main hunt URL, awards 0 points, and has no QR. Stations 1+ award points when their QR is scanned. Each station can optionally show an arrival/place information page first. After the team continues, the station's clue leads them to the next QR; you can optionally hide that clue behind a solve prompt and add a separate paid hint.</p>
         </div>
         {station ? <button className="button secondary" type="button" onClick={onCancel}>Cancel edit</button> : null}
       </div>
@@ -494,6 +523,27 @@ function StationForm({
           <input className="input" value={form.title} onChange={(e) => update('title', e.target.value)} required />
         </label>
 
+        <section className="nested-card arrival-admin-section">
+          <div className="kicker">Optional arrival information</div>
+          <p className="small muted">Use this for a short description of the room, landmark, activity, or place the team has just reached. When present, it is shown as its own page before the next clue. Add both a title and description; the image is optional.</p>
+          <div className="form" style={{ marginTop: 12 }}>
+            <label>
+              <div className="label">Arrival title</div>
+              <input className="input" value={form.arrivalTitle} onChange={(e) => update('arrivalTitle', e.target.value)} placeholder="Example: The Chapel Courtyard" />
+            </label>
+            <label>
+              <div className="label">Arrival description</div>
+              <textarea className="textarea" value={form.arrivalText} onChange={(e) => update('arrivalText', e.target.value)} placeholder="A short explanation or interesting detail about where the team is now." />
+            </label>
+            <ImageField
+              adminFetch={adminFetch}
+              label="Arrival image"
+              value={form.arrivalImageUrl}
+              onChange={(value) => update('arrivalImageUrl', value)}
+            />
+          </div>
+        </section>
+
         <label>
           <div className="label">Clue for the next station</div>
           <textarea className="textarea" value={form.body} onChange={(e) => update('body', e.target.value)} placeholder="Shown after this station is scanned, unless you enable the solve prompt below." />
@@ -504,6 +554,12 @@ function StationForm({
           label="Clue image"
           value={form.imageUrl}
           onChange={(value) => update('imageUrl', value)}
+        />
+        <AudioField
+          adminFetch={adminFetch}
+          label="Clue audio"
+          value={form.audioUrl}
+          onChange={(value) => update('audioUrl', value)}
         />
 
         <section className="nested-card">
@@ -523,6 +579,12 @@ function StationForm({
                 label="Prompt image"
                 value={form.cluePromptImageUrl}
                 onChange={(value) => update('cluePromptImageUrl', value)}
+              />
+              <AudioField
+                adminFetch={adminFetch}
+                label="Prompt audio"
+                value={form.cluePromptAudioUrl}
+                onChange={(value) => update('cluePromptAudioUrl', value)}
               />
               <label>
                 <div className="label">Accepted answers</div>
@@ -701,11 +763,16 @@ function stationToForm(station: Station | null, nextOrder: number) {
     sortOrder: String(station ? station.order : nextOrder),
     points: String(station?.points ?? 10),
     title: station?.title || '',
+    arrivalTitle: station?.arrivalTitle || '',
+    arrivalText: station?.arrivalText || '',
+    arrivalImageUrl: station?.arrivalImageUrl || '',
     body: station?.body || '',
     imageUrl: station?.imageUrl || '',
+    audioUrl: station?.audioUrl || '',
     clueRequiresSolution: Boolean(station?.clueRequiresSolution),
     cluePromptText: station?.cluePromptText || '',
     cluePromptImageUrl: station?.cluePromptImageUrl || '',
+    cluePromptAudioUrl: station?.cluePromptAudioUrl || '',
     clueAnswerKeysText: station?.clueAnswerKeys?.join('\n') || '',
     hintText: station?.hintText || '',
     hintImageUrl: station?.hintImageUrl || '',

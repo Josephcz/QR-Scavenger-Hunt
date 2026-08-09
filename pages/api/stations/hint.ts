@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { methodNotAllowed, verifyTeam } from '../../../lib/http';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
+import { hasViewedArrival } from '../../../lib/stationState';
 
 type HintBody = {
   teamId?: string;
@@ -33,6 +34,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (team.completed_order < station.sort_order) {
       return res.status(403).json({ ok: false, error: 'This hint is locked until you scan that station in sequence.' });
+    }
+
+    if (!(await hasViewedArrival(team.id, station))) {
+      return res.status(403).json({ ok: false, error: 'Continue past the station information before opening a hint.' });
     }
 
     const { data: result, error: hintError } = await supabaseAdmin.rpc('use_hint', {

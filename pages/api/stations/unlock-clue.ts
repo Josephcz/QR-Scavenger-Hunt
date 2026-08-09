@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { methodNotAllowed, verifyTeam } from '../../../lib/http';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
+import { hasViewedArrival, publicStation } from '../../../lib/stationState';
 
 type UnlockBody = {
   teamId?: string;
@@ -33,6 +34,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (team.completed_order < station.sort_order) {
       return res.status(403).json({ ok: false, error: 'This clue is locked until you scan that station in sequence.' });
+    }
+
+    if (!(await hasViewedArrival(team.id, station))) {
+      return res.status(403).json({ ok: false, error: 'Continue past the station information before solving the next clue.' });
     }
 
     const answers = Array.isArray(station.clue_answer_keys) ? station.clue_answer_keys.map(normalizeAnswer).filter(Boolean) : [];
@@ -69,24 +74,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 function normalizeAnswer(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function publicStation(station: any, clueUnlocked: boolean) {
-  const requiresClueUnlock = Boolean(station.clue_requires_solution && Array.isArray(station.clue_answer_keys) && station.clue_answer_keys.length);
-  const canShowClue = !requiresClueUnlock || clueUnlocked;
-  return {
-    id: station.id,
-    order: station.sort_order,
-    code: station.code,
-    title: station.title,
-    body: canShowClue ? station.body_markdown : '',
-    imageUrl: canShowClue ? station.image_url : null,
-    points: station.points,
-    hasHint: Boolean(station.hint_text || station.hint_image_url),
-    hintPenalty: station.hint_penalty || 0,
-    clueRequiresSolution: requiresClueUnlock,
-    clueUnlocked: canShowClue,
-    cluePromptText: requiresClueUnlock && !canShowClue ? station.clue_prompt_text : null,
-    cluePromptImageUrl: requiresClueUnlock && !canShowClue ? station.clue_prompt_image_url : null,
-  };
 }

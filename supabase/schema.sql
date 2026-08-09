@@ -21,8 +21,13 @@ create table if not exists public.stations (
   code text unique,
   scan_token text unique,
   title text not null,
+  -- Optional arrival/place information. When set, this is acknowledged before the clue is returned.
+  arrival_title text,
+  arrival_text text,
+  arrival_image_url text,
   body_markdown text not null default '',
   image_url text,
+  audio_url text,
   -- Legacy fields kept for compatibility with earlier builds. This app awards points on scan.
   question_text text not null default '',
   answer_key text,
@@ -31,6 +36,7 @@ create table if not exists public.stations (
   clue_requires_solution boolean not null default false,
   clue_prompt_text text,
   clue_prompt_image_url text,
+  clue_prompt_audio_url text,
   clue_answer_keys text[] not null default '{}'::text[],
   -- Legacy prompt fields kept unused. The current app uses clue_* for solve prompts.
   hint_prompt_text text,
@@ -49,6 +55,14 @@ create table if not exists public.stations (
     (sort_order = 0 and code is null and scan_token is null)
     or (sort_order > 0 and code is not null and scan_token is not null)
   )
+);
+
+create table if not exists public.station_arrival_views (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references public.teams(id) on delete cascade,
+  station_id uuid not null references public.stations(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique(team_id, station_id)
 );
 
 create table if not exists public.station_completions (
@@ -78,6 +92,8 @@ create table if not exists public.hint_usages (
 );
 
 create index if not exists idx_stations_sort_order on public.stations(sort_order);
+create index if not exists idx_station_arrival_views_team on public.station_arrival_views(team_id);
+create index if not exists idx_station_arrival_views_station on public.station_arrival_views(station_id);
 create index if not exists idx_station_completions_team on public.station_completions(team_id);
 create index if not exists idx_clue_unlocks_team on public.clue_unlocks(team_id);
 create index if not exists idx_clue_unlocks_station on public.clue_unlocks(station_id);
@@ -85,6 +101,7 @@ create index if not exists idx_hint_usages_team on public.hint_usages(team_id);
 
 alter table public.teams enable row level security;
 alter table public.stations enable row level security;
+alter table public.station_arrival_views enable row level security;
 alter table public.station_completions enable row level security;
 alter table public.clue_unlocks enable row level security;
 alter table public.hint_usages enable row level security;
@@ -208,6 +225,9 @@ revoke all on function public.complete_station(uuid, uuid, integer, integer) fro
 revoke all on function public.use_hint(uuid, uuid, integer) from public, anon, authenticated;
 grant execute on function public.complete_station(uuid, uuid, integer, integer) to service_role;
 grant execute on function public.use_hint(uuid, uuid, integer) to service_role;
+
+grant all on table public.station_arrival_views to service_role;
+revoke all on table public.station_arrival_views from anon, authenticated;
 
 grant all on table public.clue_unlocks to service_role;
 revoke all on table public.clue_unlocks from anon, authenticated;

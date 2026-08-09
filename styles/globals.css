@@ -396,7 +396,7 @@ tr:last-child td {
 }
 
 .stations-table {
-  min-width: 1180px;
+  min-width: 1340px;
 }
 
 .admin-preview {
@@ -698,4 +698,48 @@ a:focus-visible {
 .success-text {
   color: #bbf7d0;
   font-weight: 700;
+}
+
+/* Optional arrival/place interstitial shown before the station clue. */
+.arrival-card {
+  max-width: 920px;
+  margin: 0 auto;
+  background:
+    radial-gradient(circle at top right, rgba(255,255,255,0.07), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02));
+}
+
+.arrival-card h1 {
+  max-width: 760px;
+  margin-top: 6px;
+}
+
+.arrival-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(58vh, 560px);
+  object-fit: contain;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  margin: 18px auto;
+  background: #050505;
+}
+
+.arrival-text {
+  max-width: 760px;
+  color: rgba(255,255,255,0.82);
+  font-size: clamp(16px, 2vw, 18px);
+  line-height: 1.75;
+}
+
+.arrival-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 22px;
+}
+
+.arrival-admin-section {
+  border-color: rgba(255,255,255,0.18);
 }

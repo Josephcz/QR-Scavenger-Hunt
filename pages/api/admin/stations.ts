@@ -5,19 +5,26 @@ import { supabaseAdmin } from '../../../lib/supabaseAdmin';
 
 const IMAGE_BUCKET = 'hunt-images';
 const AUDIO_BUCKET = 'hunt-audio';
-const IMAGE_FIELDS = ['imageUrl', 'cluePromptImageUrl', 'hintImageUrl'] as const;
+const IMAGE_FIELDS = ['arrivalImageUrl', 'imageUrl', 'cluePromptImageUrl', 'hintImageUrl'] as const;
+const AUDIO_FIELDS = ['audioUrl', 'cluePromptAudioUrl', 'hintAudioUrl'] as const;
 type ImageField = (typeof IMAGE_FIELDS)[number];
+type AudioField = (typeof AUDIO_FIELDS)[number];
 
 type StationBody = {
   id?: string;
   sortOrder?: number;
   title?: string;
+  arrivalTitle?: string;
+  arrivalText?: string;
+  arrivalImageUrl?: string;
   body?: string;
   imageUrl?: string;
+  audioUrl?: string;
   points?: number;
   clueRequiresSolution?: boolean;
   cluePromptText?: string;
   cluePromptImageUrl?: string;
+  cluePromptAudioUrl?: string;
   clueAnswerKeys?: string[];
   hintText?: string;
   hintImageUrl?: string;
@@ -27,10 +34,11 @@ type StationBody = {
 };
 
 type ImageUrlMap = Record<ImageField, string | null>;
+type AudioUrlMap = Record<AudioField, string | null>;
 
 type ValidatedStationValues = {
   imageUrls: ImageUrlMap;
-  audioUrl: string | null;
+  audioUrls: AudioUrlMap;
   dbPayload: Record<string, unknown>;
 };
 
@@ -69,7 +77,7 @@ async function createStation(req: NextApiRequest, res: NextApiResponse) {
     const validated = validateStationBody(body);
     if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
-    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrl, null);
+    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrls, null);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
 
     const sortOrder = Number(validated.values.dbPayload.sort_order);
@@ -134,7 +142,7 @@ async function updateStation(req: NextApiRequest, res: NextApiResponse) {
     const validated = validateStationBody(body);
     if (validated.ok === false) return res.status(400).json({ ok: false, error: validated.error });
 
-    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrl, stationId);
+    const reuseError = await findMediaReuseError(validated.values.imageUrls, validated.values.audioUrls, stationId);
     if (reuseError) return res.status(409).json({ ok: false, error: reuseError });
 
     const nextOrder = Number(validated.values.dbPayload.sort_order);
@@ -185,10 +193,15 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
   const points = Number.isFinite(Number(body.points)) ? Number(body.points) : 10;
   const hintPenalty = Number.isFinite(Number(body.hintPenalty)) ? Number(body.hintPenalty) : 0;
   const clueRequiresSolution = Boolean(body.clueRequiresSolution);
+  const arrivalTitle = cleanOptionalString(body.arrivalTitle);
+  const arrivalText = cleanOptionalString(body.arrivalText);
+  const arrivalImageUrl = cleanOptionalString(body.arrivalImageUrl);
   const clueAnswerKeys = cleanAnswerKeys(body.clueAnswerKeys || []);
   const imageUrl = cleanOptionalString(body.imageUrl);
   const cluePromptImageUrl = cleanOptionalString(body.cluePromptImageUrl);
   const hintImageUrl = cleanOptionalString(body.hintImageUrl);
+  const audioUrl = cleanOptionalString(body.audioUrl);
+  const cluePromptAudioUrl = cleanOptionalString(body.cluePromptAudioUrl);
   const hintAudioUrl = cleanOptionalString(body.hintAudioUrl);
 
   if (!Number.isInteger(sortOrder) || sortOrder < 0) {
@@ -201,32 +214,49 @@ function validatedStationValues(body: StationBody): ValidatedStationValues | { e
     return { error: 'Hint penalty must be a non-negative integer.' };
   }
   if (!body.title?.trim()) return { error: 'Station title is required.' };
+  const hasArrivalInfo = Boolean(arrivalTitle || arrivalText || arrivalImageUrl);
+  if (hasArrivalInfo && (!arrivalTitle || !arrivalText)) {
+    return { error: 'Arrival information needs both an arrival title and arrival description. The image is optional.' };
+  }
   if (clueRequiresSolution && clueAnswerKeys.length === 0) {
     return { error: 'Add at least one accepted answer when hiding the clue behind a prompt.' };
   }
 
   const imageUrls = {
+    arrivalImageUrl,
     imageUrl,
     cluePromptImageUrl: clueRequiresSolution ? cluePromptImageUrl : null,
     hintImageUrl,
   };
   const duplicateFieldError = duplicateSubmittedImageError(imageUrls);
   if (duplicateFieldError) return { error: duplicateFieldError };
+  const audioUrls = {
+    audioUrl,
+    cluePromptAudioUrl: clueRequiresSolution ? cluePromptAudioUrl : null,
+    hintAudioUrl,
+  };
+  const duplicateAudioError = duplicateSubmittedAudioError(audioUrls);
+  if (duplicateAudioError) return { error: duplicateAudioError };
 
   return {
     imageUrls,
-    audioUrl: hintAudioUrl,
+    audioUrls,
     dbPayload: {
       sort_order: sortOrder,
       title: body.title.trim(),
+      arrival_title: arrivalTitle,
+      arrival_text: arrivalText,
+      arrival_image_url: arrivalImageUrl,
       body_markdown: body.body?.trim() || '',
       image_url: imageUrl,
+      audio_url: audioUrl,
       question_text: '',
       answer_key: null,
       points: sortOrder === 0 ? 0 : points,
       clue_requires_solution: clueRequiresSolution,
       clue_prompt_text: clueRequiresSolution ? cleanOptionalString(body.cluePromptText) : null,
       clue_prompt_image_url: clueRequiresSolution ? cluePromptImageUrl : null,
+      clue_prompt_audio_url: clueRequiresSolution ? cluePromptAudioUrl : null,
       clue_answer_keys: clueRequiresSolution ? clueAnswerKeys : [],
       hint_prompt_text: null,
       hint_prompt_image_url: null,
@@ -267,30 +297,54 @@ function duplicateSubmittedImageError(imageUrls: ImageUrlMap) {
   return '';
 }
 
-async function findMediaReuseError(imageUrls: ImageUrlMap, audioUrl: string | null, allowedStationId: string | null) {
-  const submitted = new Set(Object.values(imageUrls).filter(Boolean) as string[]);
-  if (!submitted.size && !audioUrl) return '';
+function duplicateSubmittedAudioError(audioUrls: AudioUrlMap) {
+  const seen = new Map<string, AudioField>();
+  for (const field of AUDIO_FIELDS) {
+    const url = audioUrls[field];
+    if (!url) continue;
+    const existingField = seen.get(url);
+    if (existingField) {
+      return `Use different audio for ${audioFieldLabel(existingField)} and ${audioFieldLabel(field)}. Reusing the same audio URL is blocked so removed uploads can be safely deleted.`;
+    }
+    seen.set(url, field);
+  }
+  return '';
+}
+
+async function findMediaReuseError(imageUrls: ImageUrlMap, audioUrls: AudioUrlMap, allowedStationId: string | null) {
+  const submittedImages = new Set(Object.values(imageUrls).filter(Boolean) as string[]);
+  const submittedAudio = new Set(Object.values(audioUrls).filter(Boolean) as string[]);
+  if (!submittedImages.size && !submittedAudio.size) return '';
 
   const { data, error } = await supabaseAdmin
     .from('stations')
-    .select('id,title,image_url,clue_prompt_image_url,hint_image_url,hint_audio_url');
+    .select('id,title,arrival_image_url,image_url,clue_prompt_image_url,hint_image_url,audio_url,clue_prompt_audio_url,hint_audio_url');
 
   if (error) return error.message;
 
   for (const station of data || []) {
     if (allowedStationId && station.id === allowedStationId) continue;
-    const existing: Array<[string, string | null]> = [
+    const existingImages: Array<[string, string | null]> = [
+      ['arrival image', station.arrival_image_url],
       ['clue image', station.image_url],
       ['prompt image', station.clue_prompt_image_url],
       ['hint image', station.hint_image_url],
     ];
-    for (const [label, url] of existing) {
-      if (url && submitted.has(url)) {
+    for (const [label, url] of existingImages) {
+      if (url && submittedImages.has(url)) {
         return `That image URL is already used as the ${label} for “${station.title}”. Reusing images is blocked so deletion is safe.`;
       }
     }
-    if (audioUrl && station.hint_audio_url === audioUrl) {
-      return `That audio URL is already used by “${station.title}”. Reusing uploaded audio is blocked so deletion is safe.`;
+
+    const existingAudio: Array<[string, string | null]> = [
+      ['clue audio', station.audio_url],
+      ['prompt audio', station.clue_prompt_audio_url],
+      ['paid hint audio', station.hint_audio_url],
+    ];
+    for (const [label, url] of existingAudio) {
+      if (url && submittedAudio.has(url)) {
+        return `That audio URL is already used as the ${label} for “${station.title}”. Reusing audio is blocked so deletion is safe.`;
+      }
     }
   }
 
@@ -310,21 +364,25 @@ async function deleteRemovedSupabaseMedia(oldStation: any, newStation: any) {
     if (error) warnings.push(`Could not delete old image ${path}: ${error.message}`);
   }
 
-  const oldAudioUrl = oldStation.hint_audio_url as string | null;
-  const newAudioUrl = newStation.hint_audio_url as string | null;
-  if (oldAudioUrl && oldAudioUrl !== newAudioUrl) {
+  const oldAudioUrls = stationAudioUrls(oldStation);
+  const newAudioUrls = new Set(stationAudioUrls(newStation));
+  for (const oldAudioUrl of oldAudioUrls) {
+    if (newAudioUrls.has(oldAudioUrl)) continue;
     const path = storagePathFromPublicUrl(oldAudioUrl, AUDIO_BUCKET);
-    if (path) {
-      const { error } = await supabaseAdmin.storage.from(AUDIO_BUCKET).remove([path]);
-      if (error) warnings.push(`Could not delete old audio ${path}: ${error.message}`);
-    }
+    if (!path) continue;
+    const { error } = await supabaseAdmin.storage.from(AUDIO_BUCKET).remove([path]);
+    if (error) warnings.push(`Could not delete old audio ${path}: ${error.message}`);
   }
 
   return warnings;
 }
 
 function stationImageUrls(station: any) {
-  return [station.image_url, station.clue_prompt_image_url, station.hint_image_url].filter(Boolean) as string[];
+  return [station.arrival_image_url, station.image_url, station.clue_prompt_image_url, station.hint_image_url].filter(Boolean) as string[];
+}
+
+function stationAudioUrls(station: any) {
+  return [station.audio_url, station.clue_prompt_audio_url, station.hint_audio_url].filter(Boolean) as string[];
 }
 
 function storagePathFromPublicUrl(url: string, bucket: string) {
@@ -346,9 +404,16 @@ function friendlyStationError(message: string) {
 }
 
 function fieldLabel(field: ImageField) {
+  if (field === 'arrivalImageUrl') return 'the arrival image';
   if (field === 'imageUrl') return 'the clue image';
   if (field === 'cluePromptImageUrl') return 'the prompt image';
   return 'the paid hint image';
+}
+
+function audioFieldLabel(field: AudioField) {
+  if (field === 'audioUrl') return 'the clue audio';
+  if (field === 'cluePromptAudioUrl') return 'the prompt audio';
+  return 'the paid hint audio';
 }
 
 function requestOrigin(req: NextApiRequest) {
@@ -368,12 +433,17 @@ function publicAdminStation(station: any, baseUrl: string) {
     code: station.code,
     scanToken: station.scan_token,
     title: station.title,
+    arrivalTitle: station.arrival_title,
+    arrivalText: station.arrival_text,
+    arrivalImageUrl: station.arrival_image_url,
     body: station.body_markdown,
     imageUrl: station.image_url,
+    audioUrl: station.audio_url,
     points: station.points,
     clueRequiresSolution: Boolean(station.clue_requires_solution),
     cluePromptText: station.clue_prompt_text,
     cluePromptImageUrl: station.clue_prompt_image_url,
+    cluePromptAudioUrl: station.clue_prompt_audio_url,
     clueAnswerKeys: station.clue_answer_keys || [],
     hintText: station.hint_text,
     hintImageUrl: station.hint_image_url,

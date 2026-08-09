@@ -6,8 +6,13 @@ type Station = {
   order: number;
   code?: string | null;
   title: string;
+  arrivalInfoPending: boolean;
+  arrivalTitle?: string | null;
+  arrivalText?: string | null;
+  arrivalImageUrl?: string | null;
   body: string;
   imageUrl?: string | null;
+  audioUrl?: string | null;
   points: number;
   hasHint: boolean;
   hintPenalty: number;
@@ -15,6 +20,7 @@ type Station = {
   clueUnlocked: boolean;
   cluePromptText?: string | null;
   cluePromptImageUrl?: string | null;
+  cluePromptAudioUrl?: string | null;
 };
 
 type LeaderboardRow = {
@@ -97,6 +103,8 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
   const [unlockAnswer, setUnlockAnswer] = useState('');
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState('');
+  const [continueLoading, setContinueLoading] = useState(false);
+  const [continueError, setContinueError] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -106,6 +114,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
       setHintError('');
       setUnlockAnswer('');
       setUnlockError('');
+      setContinueError('');
 
       try {
         const payload = isScan
@@ -193,6 +202,50 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
     }
   }
 
+  async function continueFromArrival() {
+    if (!state.station) return;
+    setContinueLoading(true);
+    setContinueError('');
+    try {
+      const response = await fetch('/api/stations/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamId: team.id,
+          deviceKey: team.deviceKey,
+          stationId: state.station.id,
+        }),
+      });
+      const payload = await readJsonResponse(response);
+      if (!payload.ok) {
+        setContinueError(payload.error || 'Could not continue to the next clue.');
+        return;
+      }
+
+      const nextTeam = {
+        ...team,
+        score: payload.score ?? team.score,
+        completedOrder: payload.completedOrder ?? team.completedOrder,
+      };
+      setCachedTeam(nextTeam);
+      onTeamUpdate(nextTeam);
+      setState((current) => ({
+        ...current,
+        score: payload.score ?? current.score,
+        completedOrder: payload.completedOrder ?? current.completedOrder,
+        isFinalStation: payload.isFinalStation ?? current.isFinalStation,
+        leaderboard: payload.leaderboard || current.leaderboard || [],
+        hintAlreadyUsed: payload.hintAlreadyUsed ?? current.hintAlreadyUsed,
+        message: '',
+        station: payload.station,
+      }));
+    } catch {
+      setContinueError('Network error. Try again.');
+    } finally {
+      setContinueLoading(false);
+    }
+  }
+
   async function getHint(event?: FormEvent) {
     event?.preventDefault();
     if (!state.station) return;
@@ -264,6 +317,31 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
   const station = state.station;
   if (!station) return null;
 
+  if (station.arrivalInfoPending) {
+    const finishAfter = Boolean(state.isFinalStation);
+    return (
+      <div className="card arrival-card">
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
+          <span className="pill">{station.order === 0 ? 'Welcome' : `Station #${station.order}`}</span>
+          <span className="pill">Score: <span className="score">{state.score ?? team.score}</span></span>
+        </div>
+
+        {state.message ? <div className={messageClass(state.messageKind)}>{state.message}</div> : null}
+        <div className="kicker">About this place</div>
+        <h1>{station.arrivalTitle || station.title}</h1>
+        {station.arrivalImageUrl ? <img className="arrival-image" src={station.arrivalImageUrl} alt={station.arrivalTitle || station.title} /> : null}
+        {station.arrivalText ? <p className="arrival-text" style={{ whiteSpace: 'pre-wrap' }}>{station.arrivalText}</p> : null}
+
+        <div className="arrival-actions">
+          <button className="button" type="button" onClick={continueFromArrival} disabled={continueLoading}>
+            {continueLoading ? 'Opening…' : finishAfter ? 'Finish the hunt' : station.order === 0 ? 'Continue to first clue' : 'Continue to next clue'}
+          </button>
+        </div>
+        {continueError ? <p className="notice error small">{continueError}</p> : null}
+      </div>
+    );
+  }
+
   if (state.isFinalStation) {
     return (
       <div className="card hero-card">
@@ -277,6 +355,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
           {state.awardedPoints ? <span className="pill">+{state.awardedPoints} points</span> : null}
         </div>
         {station.imageUrl ? <img className="station-image" src={station.imageUrl} alt="Final station visual" /> : null}
+        {station.audioUrl ? <audio className="hint-audio" controls preload="none" src={station.audioUrl}>Your browser does not support audio playback.</audio> : null}
         {station.body ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p> : null}
         <Leaderboard rows={state.leaderboard || []} currentTeamName={team.name} />
       </div>
@@ -305,6 +384,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
           <p className="small muted">Solve this prompt to reveal the clue for the next QR.</p>
           {station.cluePromptText ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.cluePromptText}</p> : null}
           {station.cluePromptImageUrl ? <img className="hint-image" src={station.cluePromptImageUrl} alt="Clue unlock visual" /> : null}
+          {station.cluePromptAudioUrl ? <audio className="hint-audio" controls preload="none" src={station.cluePromptAudioUrl}>Your browser does not support audio playback.</audio> : null}
           <form className="form compact-form" onSubmit={unlockClue}>
             <label>
               <div className="label">Answer</div>
@@ -317,6 +397,7 @@ export function StationRunner({ code = '', token = '', team, onTeamUpdate }: Pro
       ) : (
         <>
           {station.imageUrl ? <img className="station-image" src={station.imageUrl} alt="Station visual clue" /> : null}
+          {station.audioUrl ? <audio className="hint-audio" controls preload="none" src={station.audioUrl}>Your browser does not support audio playback.</audio> : null}
           {station.body ? <p style={{ whiteSpace: 'pre-wrap' }}>{station.body}</p> : null}
         </>
       )}

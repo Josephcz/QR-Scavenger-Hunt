@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { methodNotAllowed, verifyTeam } from '../../../lib/http';
-import { getFinalActiveStation, getLeaderboard, getStationByOrder, hasUnlockedClue, hasUsedHint, publicStation } from '../../../lib/stationState';
+import { getFinalActiveStation, getLeaderboard, getStationByOrder, hasUnlockedClue, hasUsedHint, hasViewedArrival, publicStation } from '../../../lib/stationState';
 
 type CurrentBody = {
   teamId?: string;
@@ -28,6 +28,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const finalStation = await getFinalActiveStation();
     const isFinalStation = Boolean(finalStation && team.completed_order >= finalStation.sort_order && station.sort_order === finalStation.sort_order);
     const clueUnlocked = await hasUnlockedClue(team.id, station);
+    const arrivalViewed = await hasViewedArrival(team.id, station);
+    const showFinalResults = isFinalStation && arrivalViewed;
 
     return res.status(200).json({
       ok: true,
@@ -40,9 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       score: team.total_score,
       completedOrder: team.completed_order,
       isFinalStation,
-      leaderboard: isFinalStation ? await getLeaderboard() : [],
+      leaderboard: showFinalResults ? await getLeaderboard() : [],
       hintAlreadyUsed: await hasUsedHint(team.id, station.id),
-      station: publicStation(station, clueUnlocked),
+      station: publicStation(station, clueUnlocked, arrivalViewed),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Invalid request.';

@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { methodNotAllowed, verifyTeam } from '../../../lib/http';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
-import { getFinalActiveStation, getLeaderboard, getStationByOrder, hasUnlockedClue, hasUsedHint, publicStation } from '../../../lib/stationState';
+import { getFinalActiveStation, getLeaderboard, getStationByOrder, hasUnlockedClue, hasUsedHint, hasViewedArrival, publicStation } from '../../../lib/stationState';
 
 type ScanBody = {
   teamId?: string;
@@ -98,7 +98,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    const messageKind: ScanMessageKind = requestedStation.sort_order <= team.completed_order ? 'past' : 'future';
+    const messageKind: ScanMessageKind = requestedStation.sort_order < team.completed_order
+      ? 'past'
+      : requestedStation.sort_order > team.completed_order
+        ? 'future'
+        : 'current';
     return res.status(200).json(await currentCluePayload({
       team,
       station: currentStation,
@@ -130,8 +134,9 @@ async function currentCluePayload({
   messageKind: ScanMessageKind;
   isFinalStation: boolean;
 }) {
-  const leaderboard = isFinalStation ? await getLeaderboard() : [];
   const clueUnlocked = await hasUnlockedClue(team.id, station);
+  const arrivalViewed = await hasViewedArrival(team.id, station);
+  const leaderboard = isFinalStation && arrivalViewed ? await getLeaderboard() : [];
   return {
     ok: true,
     alreadyCompleted,
@@ -145,7 +150,7 @@ async function currentCluePayload({
     isFinalStation,
     leaderboard,
     hintAlreadyUsed: await hasUsedHint(team.id, station.id),
-    station: publicStation(station, clueUnlocked),
+    station: publicStation(station, clueUnlocked, arrivalViewed),
   };
 }
 
@@ -154,13 +159,13 @@ function scanMessage(kind: ScanMessageKind, points: number) {
     case 'awarded':
       return `QR scan confirmed. +${points} point${points === 1 ? '' : 's'}.`;
     case 'past':
-      return 'That QR is from an earlier station. Here is your current clue.';
+      return 'That QR is from an earlier station. Returning you to your current station.';
     case 'future':
-      return 'That QR is locked for later. Here is your current clue.';
+      return 'That QR is locked for later. Returning you to your current station.';
     case 'finished':
-      return 'You already finished the hunt.';
+      return 'The final QR was already counted.';
     case 'current':
     default:
-      return 'This QR scan was already counted. Here is your current clue.';
+      return 'This QR scan was already counted. You are still at this station.';
   }
 }

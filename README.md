@@ -137,3 +137,8 @@ npm run build
 ```
 
 The project uses the Next.js Pages Router (`pages/` and `pages/api/*`).
+
+
+## Arrival/place information
+
+A station can optionally show a title, description, and image before the next clue. The acknowledgement is stored server-side per team/station, so refreshing does not skip or repeat the page unexpectedly.
